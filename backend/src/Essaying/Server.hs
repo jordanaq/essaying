@@ -13,4 +13,4 @@ import Network.Wai (Application)
 import Servant (Proxy (..), (:<|>) ((:<|>)), serve)
 
 app :: Application
-app = serve (Proxy @Api) ((healthHandler :<|> readyHandler) :<|> readyHandler)
+app = serve (Proxy @Api) (healthHandler :<|> readyHandler)

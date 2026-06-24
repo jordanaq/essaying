@@ -24,8 +24,7 @@ import Test.HUnit (Test (..), assertEqual, assertFailure, runTestTT)
 
 healthClient :: ClientM HealthResponse
 readyClient :: ClientM ReadyResponse
-legacyReadyClient :: ClientM ReadyResponse
-(healthClient :<|> readyClient) :<|> legacyReadyClient = client (Proxy @Api)
+(healthClient :<|> readyClient) = client (Proxy @Api)
 
 main :: IO ()
 main = do
@@ -40,7 +39,6 @@ tests = TestList
   , TestLabel "ready response json" readyResponseJson
   , TestLabel "health endpoint" healthEndpoint
   , TestLabel "ready endpoint" readyEndpoint
-  , TestLabel "legacy ready endpoint" legacyReadyEndpoint
   ]
 
 healthResponseValue :: Test
@@ -102,15 +100,3 @@ readyEndpoint = TestCase $
       Right response -> do
         assertEqual "ready endpoint message" "System Ready" (message response)
         assertEqual "ready endpoint sample context" mempty (sampleContext response)
-
-legacyReadyEndpoint :: Test
-legacyReadyEndpoint = TestCase $
-  testWithApplication (pure app) $ \port -> do
-    manager <- newManager defaultManagerSettings
-    let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
-    result <- runClientM legacyReadyClient env
-    case result of
-      Left err -> assertFailure (show err)
-      Right response -> do
-        assertEqual "legacy ready endpoint message" "System Ready" (message response)
-        assertEqual "legacy ready endpoint sample context" mempty (sampleContext response)

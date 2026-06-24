@@ -13,5 +13,4 @@ type Api =
        "api" :> "v1" :>
          (    "health" :> Get '[JSON] HealthResponse
          :<|> "ready" :> Get '[JSON] ReadyResponse
-         )
-  :<|> "api" :> "ready" :> Get '[JSON] ReadyResponse
+    )
