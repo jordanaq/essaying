@@ -1,0 +1,13 @@
+dist-newstyle/
+backend/dist-newstyle/
+*.hi
+*.o
+*.prof
+*.aux
+*.hp
+*.eventlog
+.result
+result
+.env
+frontend/node_modules/
+frontend/dist/

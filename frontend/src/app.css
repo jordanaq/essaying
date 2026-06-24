@@ -1,0 +1,231 @@
+:root {
+  --ctp-rosewater: #f4dbd6;
+  --ctp-text: #cad3f5;
+  --ctp-subtext1: #b8c0e0;
+  --ctp-subtext0: #a5adcb;
+  --ctp-surface0: #363a4f;
+  --ctp-surface1: #494d64;
+  --ctp-surface2: #5b6078;
+  --ctp-base: #24273a;
+  --ctp-mantle: #1e2030;
+  --ctp-crust: #181926;
+  --app-orb1: #313244;
+  --app-orb2: rgba(244, 219, 214, 0.14);
+  --app-primary-fg: var(--ctp-crust);
+
+  /* Shoelace primary scale remapped to Catppuccin Macchiato Rosewater */
+  --sl-color-primary-50: #fdf6f4;
+  --sl-color-primary-100: #fbece9;
+  --sl-color-primary-200: #f9e3df;
+  --sl-color-primary-300: #f6d9d4;
+  --sl-color-primary-400: #f5d6d1;
+  --sl-color-primary-500: #f4dbd6;
+  --sl-color-primary-600: #dcb4af;
+  --sl-color-primary-700: #c4908b;
+  --sl-color-primary-800: #a96f6a;
+  --sl-color-primary-900: #87524d;
+  --sl-color-primary-950: #653b37;
+
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--ctp-text);
+  background: var(--ctp-base);
+}
+
+:root[data-theme="latte"] {
+  --ctp-rosewater: #dc8a78;
+  --ctp-text: #4c4f69;
+  --ctp-subtext1: #5c5f77;
+  --ctp-subtext0: #6c6f85;
+  --ctp-surface0: #ccd0da;
+  --ctp-surface1: #bcc0cc;
+  --ctp-surface2: #acb0be;
+  --ctp-base: #eff1f5;
+  --ctp-mantle: #e6e9ef;
+  --ctp-crust: #dce0e8;
+  --app-orb1: #ccd0da;
+  --app-orb2: rgba(220, 138, 120, 0.18);
+  --app-primary-fg: #4c4f69;
+
+  --sl-color-primary-50: #fdf3f1;
+  --sl-color-primary-100: #f9e7e2;
+  --sl-color-primary-200: #f4d8d1;
+  --sl-color-primary-300: #efc8bf;
+  --sl-color-primary-400: #e7aba0;
+  --sl-color-primary-500: #dc8a78;
+  --sl-color-primary-600: #c67a69;
+  --sl-color-primary-700: #a86558;
+  --sl-color-primary-800: #8a5248;
+  --sl-color-primary-900: #6d413a;
+  --sl-color-primary-950: #512f2b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 10% 20%, var(--app-orb1) 0, transparent 34%),
+    radial-gradient(circle at 90% 10%, var(--app-orb2) 0, transparent 28%),
+    linear-gradient(180deg, var(--ctp-mantle) 0%, var(--ctp-crust) 80%);
+}
+
+main {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: var(--panel-cols, 260px 1fr 340px);
+  gap: 14px;
+}
+
+.panel {
+  min-height: 68vh;
+}
+
+.panel::part(base) {
+  background: color-mix(in oklab, var(--ctp-surface0) 84%, black 16%);
+  border: 1px solid color-mix(in oklab, var(--ctp-surface2) 70%, black 30%);
+  color: var(--ctp-text);
+}
+
+.panel::part(header) {
+  border-bottom: 1px solid color-mix(in oklab, var(--ctp-surface2) 55%, black 45%);
+}
+
+.panel.is-collapsed {
+  min-height: 0;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.panel-header-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tree {
+  display: grid;
+  gap: 8px;
+}
+
+.tree button {
+  text-align: left;
+}
+
+.meta {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.status-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.footer-note {
+  margin-top: 14px;
+  color: var(--ctp-subtext0);
+  font-size: 0.9rem;
+}
+
+sl-badge::part(base) {
+  border-color: color-mix(in oklab, var(--ctp-rosewater) 55%, var(--ctp-surface2) 45%);
+}
+
+sl-input::part(base),
+sl-textarea::part(base),
+sl-select::part(combobox) {
+  background: color-mix(in oklab, var(--ctp-surface0) 88%, black 12%);
+  border-color: color-mix(in oklab, var(--ctp-surface2) 65%, black 35%);
+  color: var(--ctp-text);
+}
+
+sl-input::part(input),
+sl-textarea::part(textarea),
+sl-select::part(display-input) {
+  color: var(--ctp-text);
+}
+
+/* Keep the details summary strip and text container on one unified tone. */
+sl-details {
+  --details-bg: color-mix(in oklab, var(--ctp-surface0) 90%, black 10%);
+  --details-border: color-mix(in oklab, var(--ctp-surface2) 65%, black 35%);
+}
+
+sl-details::part(base) {
+  background: var(--details-bg);
+  border: 1px solid var(--details-border);
+  color: var(--ctp-text);
+}
+
+sl-details::part(summary),
+sl-details::part(summary-text),
+sl-details::part(content) {
+  background: var(--details-bg);
+  color: var(--ctp-text);
+}
+
+sl-details::part(summary-icon) {
+  color: var(--ctp-rosewater);
+}
+
+sl-button[variant="default"]::part(base) {
+  background: color-mix(in oklab, var(--ctp-surface1) 88%, black 12%);
+  border-color: color-mix(in oklab, var(--ctp-surface2) 70%, black 30%);
+  color: var(--ctp-text);
+}
+
+sl-button[variant="default"]::part(base):hover {
+  background: color-mix(in oklab, var(--ctp-surface2) 82%, black 18%);
+}
+
+sl-button[variant="primary"]::part(base) {
+  color: var(--app-primary-fg);
+  font-weight: 600;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
+  }
+}

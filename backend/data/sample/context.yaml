@@ -1,0 +1,13 @@
+title: Essay Workspace
+audience: student
+model: llama3.1:8b
+instructions:
+  - Keep writing concise and clear.
+  - Use markdown headings when useful.
+rubric:
+  clarity:
+    weight: 0.4
+    description: Writing is coherent and easy to follow.
+  evidence:
+    weight: 0.6
+    description: Claims are supported by references or examples.
