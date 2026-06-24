@@ -1,5 +1,5 @@
 {
-  description = "A local-first essay platform in Haskell with an Elm client";
+  description = "A local-first essay platform in Haskell with a Svelte-based client";
 
   nixConfig = {
     allow-import-from-derivation = true;
@@ -76,6 +76,24 @@
               exit "$exit_code"
             '';
           };
+
+          testLauncher = pkgs.writeShellApplication {
+            name = "test";
+            runtimeInputs = [ pkgs.nix pkgs.nodejs_22 ];
+            text = ''
+              set -euo pipefail
+
+              (
+                cd backend
+                nix --accept-flake-config develop -c \
+                  cabal test haskell-essaying-test --test-show-details=streaming
+              )
+
+              if [ -f frontend/package.json ]; then
+                (cd frontend && npm test)
+              fi
+            '';
+          };
         in {
         haskellProjects.backend = {
           projectRoot = ./backend;
@@ -96,6 +114,7 @@
         packages.backend = config.haskellProjects.backend.outputs.packages.haskell-essaying.package;
         packages.frontend = frontendLauncher;
         packages.dev = devLauncher;
+        packages.test = testLauncher;
         apps.default = config.haskellProjects.backend.outputs.apps.haskell-essaying;
         apps.backend = config.haskellProjects.backend.outputs.apps.haskell-essaying;
         apps.frontend = {
@@ -105,6 +124,10 @@
         apps.dev = {
           type = "app";
           program = "${pkgs.lib.getExe devLauncher}";
+        };
+        apps.test = {
+          type = "app";
+          program = "${pkgs.lib.getExe testLauncher}";
         };
 
         devShells.default = pkgs.mkShell {
