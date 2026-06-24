@@ -33,6 +33,9 @@
   let gradeStream = "";
   let status = "Idle";
   let backendMessage = "Not fetched";
+  let backendContextTitle = "-";
+  let backendContextModel = "-";
+  let backendInstructionCount = 0;
   let loadingReady = false;
   let theme: "macchiato" | "latte" = "macchiato";
   let panelState = {
@@ -61,17 +64,23 @@
     status = "Checking backend";
 
     try {
-      const res = await fetch("/api/ready");
+      const res = await fetch("/api/v1/ready");
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data: ReadyResponse = await res.json();
       backendMessage = data.message;
+      backendContextTitle = data.sampleContext.title ?? "(none)";
+      backendContextModel = data.sampleContext.model ?? "(none)";
+      backendInstructionCount = data.sampleContext.instructions.length;
       model = data.sampleContext.model ?? model;
       status = "Backend ready";
     } catch (err) {
       backendMessage = `Error: ${String(err)}`;
+      backendContextTitle = "-";
+      backendContextModel = "-";
+      backendInstructionCount = 0;
       status = "Backend unavailable";
     } finally {
       loadingReady = false;
@@ -225,6 +234,12 @@
 
       {#if panelState.feedback}
         <sl-input label="Backend status" value={backendMessage} readonly></sl-input>
+
+        <div class="backend-meta">
+          <sl-badge variant="neutral">Title: {backendContextTitle}</sl-badge>
+          <sl-badge variant="neutral">Model: {backendContextModel}</sl-badge>
+          <sl-badge variant="neutral">Instructions: {backendInstructionCount}</sl-badge>
+        </div>
 
         <sl-textarea
           style="margin-top: 10px"

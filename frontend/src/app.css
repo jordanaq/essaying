@@ -158,6 +158,13 @@ h3 {
   margin-top: 10px;
 }
 
+.backend-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .footer-note {
   margin-top: 14px;
   color: var(--ctp-subtext0);
