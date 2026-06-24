@@ -1,2 +1,5 @@
 packages:
 	.
+
+package haskell-essaying
+  tests: True
