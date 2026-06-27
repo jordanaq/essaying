@@ -94,6 +94,21 @@
               fi
             '';
           };
+
+          cleanLauncher = pkgs.writeShellApplication {
+            name = "clean";
+            runtimeInputs = [ pkgs.nix ];
+            text = ''
+              set -euo pipefail
+
+              (
+                cd backend
+                nix --accept-flake-config develop -c cabal clean
+              )
+
+              echo "Backend build artifacts cleaned."
+            '';
+          };
         in {
         haskellProjects.backend = {
           projectRoot = ./backend;
@@ -115,6 +130,7 @@
         packages.frontend = frontendLauncher;
         packages.dev = devLauncher;
         packages.test = testLauncher;
+        packages.clean = cleanLauncher;
         apps.default = config.haskellProjects.backend.outputs.apps.haskell-essaying;
         apps.backend = config.haskellProjects.backend.outputs.apps.haskell-essaying;
         apps.frontend = {
@@ -128,6 +144,10 @@
         apps.test = {
           type = "app";
           program = "${pkgs.lib.getExe testLauncher}";
+        };
+        apps.clean = {
+          type = "app";
+          program = "${pkgs.lib.getExe cleanLauncher}";
         };
 
         devShells.default = pkgs.mkShell {
