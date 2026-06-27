@@ -3,12 +3,15 @@
 
 module Main where
 
+import Control.Exception (finally)
 import Data.Aeson (decode, encode)
 import Data.Proxy (Proxy (..))
 import Essaying.API.V1 (Api)
 import Essaying.Context (Context (..))
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
 import Essaying.Server (app)
+import Essaying.Storage (resolveCacheRoot)
+import Essaying.Types.Storage (CacheRoot (..))
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Servant.Client
@@ -20,6 +23,9 @@ import Servant.Client
   , runClientM
   )
 import Servant ( (:<|>) ((:<|>)) )
+import System.Directory (getHomeDirectory)
+import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.FilePath ((</>), normalise)
 import Test.HUnit (Test (..), assertEqual, assertFailure, runTestTT)
 
 healthClient :: ClientM HealthResponse
@@ -37,6 +43,8 @@ tests = TestList
   , TestLabel "health response json" healthResponseJson
   , TestLabel "ready response value" readyResponseValue
   , TestLabel "ready response json" readyResponseJson
+  , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
+  , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
   , TestLabel "health endpoint" healthEndpoint
   , TestLabel "ready endpoint" readyEndpoint
   ]
@@ -78,6 +86,31 @@ readyResponseJson = TestCase $ do
       response = readyResponseFromContext sampleContext
       expected = Just response
   assertEqual "ready response JSON should round-trip" expected (decode (encode response))
+
+resolveCacheRootFallback :: Test
+resolveCacheRootFallback = TestCase $ do
+  home <- getHomeDirectory
+  let expected = normalise (home </> ".cache" </> "hessaying")
+  withEnvVar "HESSAY_CACHE" Nothing $ do
+    CacheRoot resolved <- resolveCacheRoot
+    assertEqual "fallback should resolve to ~/.cache/hessaying" expected resolved
+
+resolveCacheRootEnvOverride :: Test
+resolveCacheRootEnvOverride = TestCase $ do
+  let requested = "/tmp/hessay-cache-test"
+      expected = normalise requested
+  withEnvVar "HESSAY_CACHE" (Just requested) $ do
+    CacheRoot resolved <- resolveCacheRoot
+    assertEqual "env override should be used when HESSAY_CACHE is set" expected resolved
+
+withEnvVar :: String -> Maybe String -> IO a -> IO a
+withEnvVar key newValue action = do
+  oldValue <- lookupEnv key
+  setMaybe key newValue
+  action `finally` setMaybe key oldValue
+  where
+    setMaybe k (Just v) = setEnv k v
+    setMaybe k Nothing = unsetEnv k
 
 healthEndpoint :: Test
 healthEndpoint = TestCase $
