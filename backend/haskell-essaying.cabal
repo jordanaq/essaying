@@ -16,6 +16,10 @@ executable haskell-essaying
     , Essaying.Context
     , Essaying.Handler.Health
     , Essaying.Server
+    , Essaying.Storage
+    , Essaying.Types.Account
+    , Essaying.Types.Storage
+    , Essaying.Utils
   build-depends:
       base >=4.18 && <5
     , aeson >=2.2
@@ -42,10 +46,16 @@ test-suite haskell-essaying-test
     , Essaying.API.V1
     , Essaying.Handler.Health
     , Essaying.Server
+    , Essaying.Storage
+    , Essaying.Types.Account
+    , Essaying.Types.Storage
+    , Essaying.Utils
   build-depends:
       base >=4.18 && <5
     , aeson >=2.2
     , containers >=0.6
+    , directory >=1.3
+    , filepath >=1.4
     , HUnit >=1.6
     , http-client >=0.7
     , servant-client >=0.20
