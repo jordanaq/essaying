@@ -12,9 +12,9 @@ import Data.Text (Text)
 import Essaying.API.V1 (Api)
 import Essaying.Context (Context (..))
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
-import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile)
+import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile, readAccountProfile)
 import Essaying.Server (app)
-import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot)
+import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Storage (CacheRoot (..))
 import Network.HTTP.Client (defaultManagerSettings, newManager)
@@ -30,8 +30,9 @@ import Servant.Client
 import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, getCurrentDirectory, getHomeDirectory, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
-import System.FilePath ((</>), normalise)
+import System.FilePath ((</>), normalise, takeDirectory)
 import Test.HUnit (Test (..), assertEqual, assertFailure, runTestTT)
+import qualified Data.ByteString.Lazy as BL
 
 healthClient :: ClientM HealthResponse
 readyClient :: ClientM ReadyResponse
@@ -58,6 +59,7 @@ tests = TestList
   , TestLabel "list accounts endpoint with sample cache" listAccountsEndpointWithSampleCache
   , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
   , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
+  , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
   ]
 
 healthResponseValue :: Test
@@ -227,6 +229,22 @@ createAndDeleteAccountEndpoints = TestCase $
           Left _ -> pure ()
           Right profile ->
             assertFailure ("expected missing account after delete, but got: " <> show profile)
+
+readAccountProfileRejectsMismatchedAccountId :: Test
+readAccountProfileRejectsMismatchedAccountId = TestCase $
+  withEphemeralCacheRoot $ \cachePath -> do
+    let acctRoot = accountRoot (usersRoot (CacheRoot cachePath)) (AccountId "alice")
+        mismatchedProfile = AccountProfile (AccountId "bob") "Bob" Nothing
+        profilePath = profileRoot acctRoot
+
+    createDirectoryIfMissing True (takeDirectory profilePath)
+    BL.writeFile profilePath (encode mismatchedProfile)
+
+    loaded <- readAccountProfile acctRoot
+    assertEqual
+      "mismatched accountId in profile should be treated as invalid"
+      Nothing
+      loaded
 
 withEphemeralCacheRoot :: (FilePath -> IO a) -> IO a
 withEphemeralCacheRoot action = do
