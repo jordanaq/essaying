@@ -1,0 +1,7 @@
+{
+  "accountId": {
+    "unAccountId": "alice"
+  },
+  "displayName": "Alice",
+  "preferredModel": "llama3.1:8b"
+}

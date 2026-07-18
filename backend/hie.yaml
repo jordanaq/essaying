@@ -1,0 +1,8 @@
+cradle:
+  cabal:
+    - path: "./app"
+      component: "exe:haskell-essaying"
+    - path: "./src"
+      component: "exe:haskell-essaying"
+    - path: "./test"
+      component: "test:haskell-essaying-test"
