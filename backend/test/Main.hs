@@ -4,13 +4,18 @@
 module Main where
 
 import Control.Exception (finally)
+import Control.Monad (when)
 import Data.Aeson (decode, encode)
+import Data.List (sortOn)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import Essaying.API.V1 (Api)
 import Essaying.Context (Context (..))
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
+import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile)
 import Essaying.Server (app)
-import Essaying.Storage (resolveCacheRoot)
+import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot)
+import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Storage (CacheRoot (..))
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
@@ -22,15 +27,18 @@ import Servant.Client
   , mkClientEnv
   , runClientM
   )
-import Servant ( (:<|>) ((:<|>)) )
-import System.Directory (getHomeDirectory)
+import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, getCurrentDirectory, getHomeDirectory, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>), normalise)
 import Test.HUnit (Test (..), assertEqual, assertFailure, runTestTT)
 
 healthClient :: ClientM HealthResponse
 readyClient :: ClientM ReadyResponse
-(healthClient :<|> readyClient) = client (Proxy @Api)
+listAccountsClient :: ClientM [AccountProfile]
+createAccountClient :: CreateAccountRequest -> ClientM AccountProfile
+accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent)
+(healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
 
 main :: IO ()
 main = do
@@ -47,6 +55,9 @@ tests = TestList
   , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
   , TestLabel "health endpoint" healthEndpoint
   , TestLabel "ready endpoint" readyEndpoint
+  , TestLabel "list accounts endpoint with sample cache" listAccountsEndpointWithSampleCache
+  , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
+  , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
   ]
 
 healthResponseValue :: Test
@@ -133,3 +144,104 @@ readyEndpoint = TestCase $
       Right response -> do
         assertEqual "ready endpoint message" "System Ready" (message response)
         assertEqual "ready endpoint sample context" mempty (sampleContext response)
+
+listAccountsEndpointWithSampleCache :: Test
+listAccountsEndpointWithSampleCache = TestCase $ do
+  sampleCachePath <- resolveSampleCachePath
+  withEnvVar "HESSAY_CACHE" (Just sampleCachePath) $
+    testWithApplication (pure app) $ \port -> do
+      manager <- newManager defaultManagerSettings
+      let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+      result <- runClientM listAccountsClient env
+      case result of
+        Left err -> assertFailure (show err)
+        Right profiles -> do
+          let expectedProfiles =
+                [ AccountProfile (AccountId "alice") "Alice" (Just "llama3.1:8b")
+                , AccountProfile (AccountId "bob") "Bob" Nothing
+                ]
+              sortProfiles = sortOn (unAccountId . accountId)
+          assertEqual "list accounts endpoint should return fixture accounts"
+            (sortProfiles expectedProfiles)
+            (sortProfiles profiles)
+
+resolveSampleCachePath :: IO FilePath
+resolveSampleCachePath = do
+  cwd <- getCurrentDirectory
+  let direct = normalise (cwd </> "data" </> "sample" </> "cache")
+      monorepo = normalise (cwd </> "backend" </> "data" </> "sample" </> "cache")
+
+  directExists <- doesDirectoryExist direct
+  if directExists
+    then pure direct
+    else pure monorepo
+
+createAccountProfileDuplicate :: Test
+createAccountProfileDuplicate = TestCase $ do
+  sampleCachePath <- resolveSampleCachePath
+  let acctId = AccountId "alice"
+      profile = AccountProfile acctId "Alice" (Just "llama3.1:8b")
+      acctRoot = accountRoot (usersRoot (CacheRoot sampleCachePath)) acctId
+
+  result <- createAccountProfile acctRoot profile
+  assertEqual "duplicate account create should be rejected"
+    AccountAlreadyExists
+    result
+
+createAndDeleteAccountEndpoints :: Test
+createAndDeleteAccountEndpoints = TestCase $
+  withEphemeralCacheRoot $ \cachePath ->
+    withEnvVar "HESSAY_CACHE" (Just cachePath) $
+      testWithApplication (pure app) $ \port -> do
+        manager <- newManager defaultManagerSettings
+        let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+            createReq = CreateAccountRequest "Charlie" (Just "llama3.1:8b")
+
+        created <- runClientM (createAccountClient createReq) env
+        case created of
+          Left err -> assertFailure ("create failed: " <> show err)
+          Right profile ->
+            assertEqual
+              "create endpoint should return created profile"
+              (AccountProfile (AccountId "charlie") "Charlie" (Just "llama3.1:8b"))
+              profile
+
+        let getClient :<|> _ :<|> deleteClient = accountByIdClient "charlie"
+
+        fetched <- runClientM getClient env
+        case fetched of
+          Left err -> assertFailure ("fetch after create failed: " <> show err)
+          Right profile ->
+            assertEqual
+              "get endpoint should return created profile"
+              (AccountProfile (AccountId "charlie") "Charlie" (Just "llama3.1:8b"))
+              profile
+
+        deleted <- runClientM deleteClient env
+        case deleted of
+          Left err -> assertFailure ("delete failed: " <> show err)
+          Right noContent -> assertEqual "delete endpoint should return NoContent" NoContent noContent
+
+        fetchedAfterDelete <- runClientM getClient env
+        case fetchedAfterDelete of
+          Left _ -> pure ()
+          Right profile ->
+            assertFailure ("expected missing account after delete, but got: " <> show profile)
+
+withEphemeralCacheRoot :: (FilePath -> IO a) -> IO a
+withEphemeralCacheRoot action = do
+  cwd <- getCurrentDirectory
+  let direct = normalise (cwd </> "data" </> "tmp-test-cache")
+      monorepo = normalise (cwd </> "backend" </> "data" </> "tmp-test-cache")
+
+  backendDirExists <- doesDirectoryExist (cwd </> "backend")
+  let cachePath = if backendDirExists then monorepo else direct
+
+  ensureCleanDir cachePath
+  action cachePath `finally` ensureCleanDir cachePath
+
+ensureCleanDir :: FilePath -> IO ()
+ensureCleanDir dirPath = do
+  exists <- doesDirectoryExist dirPath
+  when exists $ removePathForcibly dirPath
+  createDirectoryIfMissing True dirPath
