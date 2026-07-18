@@ -33,6 +33,7 @@ executable haskell-essaying
     , servant-server >=0.20
     , text >=2.0
     , wai-cors >=0.2
+    , wai-extra >=3.1
     , wai >=3.2
     , warp >=3.3
     , yaml >=0.11
@@ -67,5 +68,6 @@ test-suite haskell-essaying-test
     , servant-server >=0.20
     , text >=2.0
     , wai >=3.2
+    , wai-extra >=3.1
     , warp >=3.3
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N
