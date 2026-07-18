@@ -267,6 +267,7 @@
         </div>
 
         <div class="status-row">
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button size="small" variant="default" on:click={toggleTheme}>
             {theme === "macchiato" ? "Switch to Light" : "Switch to Macchiato"}
           </sl-button>
@@ -277,6 +278,7 @@
         <sl-card>
           <div slot="header" class="panel-header">
             <h2>Choose Account</h2>
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <sl-button size="small" variant="default" on:click={() => loadAccounts()}>
               Refresh
             </sl-button>
@@ -292,6 +294,7 @@
           {:else}
             <div class="account-list">
               {#each accounts as account}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                 <sl-button
                   variant="default"
                   on:click={() => loginAs(account.accountId.unAccountId)}
@@ -312,13 +315,13 @@
             <sl-input
               label="Display Name"
               value={newAccountName}
-              on:sl-input={(e) => (newAccountName = (e.target as { value?: string }).value ?? "")}
+              on:sl-input={(e: Event) => (newAccountName = (e.target as { value?: string }).value ?? "")}
             ></sl-input>
 
             <sl-select
               label="Preferred Model"
               value={newAccountModel}
-              on:sl-change={(e) => (newAccountModel = (e.target as { value?: string }).value ?? "")}
+              on:sl-change={(e: Event) => (newAccountModel = (e.target as { value?: string }).value ?? "")}
             >
               <sl-option value="llama3.1:8b">llama3.1:8b</sl-option>
               <sl-option value="qwen2.5:7b">qwen2.5:7b</sl-option>
@@ -331,6 +334,7 @@
           {/if}
 
           <div class="editor-actions">
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <sl-button variant="primary" on:click={createAccount} disabled={creatingAccount}>
               {creatingAccount ? "Creating..." : "Create Account"}
             </sl-button>
@@ -351,12 +355,16 @@
         <sl-spinner></sl-spinner>
       {/if}
       <sl-badge variant="neutral">{status}</sl-badge>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <sl-button size="small" variant="default" on:click={toggleTheme}>
         {theme === "macchiato" ? "Switch to Light" : "Switch to Macchiato"}
       </sl-button>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <sl-button size="small" variant="primary" on:click={checkBackend}>Check API</sl-button>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <sl-button size="small" variant="danger" on:click={logout}>Log Out</sl-button>
       {#if anyCollapsed}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <sl-button size="small" variant="default" on:click={expandAllPanels}>Expand All Panels</sl-button>
       {/if}
     </div>
@@ -366,6 +374,7 @@
     <sl-card class={`panel ${panelState.tree ? "" : "is-collapsed"}`}>
       <div slot="header" class="panel-header">
         <h2>{panelState.tree ? "Folder Tree" : "Tree"}</h2>
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <sl-button size="small" variant="default" on:click={() => togglePanel("tree")}>
           {panelState.tree ? "Collapse" : "Expand"}
         </sl-button>
@@ -374,6 +383,7 @@
       {#if panelState.tree}
         <div class="tree">
           {#each essays as essay}
+            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
             <sl-button
               variant={essay === selectedEssay ? "primary" : "default"}
               on:click={() => (selectedEssay = essay)}
@@ -396,6 +406,7 @@
           {#if panelState.editor}
             <sl-badge>{selectedEssay}</sl-badge>
           {/if}
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button size="small" variant="default" on:click={() => togglePanel("editor")}>
             {panelState.editor ? "Collapse" : "Expand"}
           </sl-button>
@@ -419,7 +430,9 @@
         </div>
 
         <div class="editor-actions">
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="primary" on:click={saveDraft}>Save Draft</sl-button>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="default" on:click={mockGrade}>Grade (mock stream)</sl-button>
         </div>
       {/if}
@@ -428,6 +441,7 @@
     <sl-card class={`panel ${panelState.feedback ? "" : "is-collapsed"}`}>
       <div slot="header" class="panel-header">
         <h2>{panelState.feedback ? "AI Feedback" : "Feedback"}</h2>
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <sl-button size="small" variant="default" on:click={() => togglePanel("feedback")}>
           {panelState.feedback ? "Collapse" : "Expand"}
         </sl-button>
