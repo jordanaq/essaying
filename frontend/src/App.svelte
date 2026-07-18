@@ -34,6 +34,9 @@
     preferredModel: string | null;
   };
 
+  type UiLogLevel = "info" | "warn" | "error";
+  const uiLoggingEnabled = import.meta.env.MODE !== "test";
+
   const essays = [
     "History/Project-Alpha/French-Revolution-Outline.md",
     "Literature/Poetry/Romanticism-Draft.md",
@@ -80,6 +83,32 @@
       ? null
       : accounts.find((account) => account.accountId.unAccountId === activeAccountId) ?? null;
 
+  function uiLog(level: UiLogLevel, message: string, details?: unknown) {
+    if (!uiLoggingEnabled) {
+      return;
+    }
+
+    const prefix = `[frontend-ui] ${new Date().toISOString()}`;
+    if (details === undefined) {
+      if (level === "error") {
+        console.error(prefix, message);
+      } else if (level === "warn") {
+        console.warn(prefix, message);
+      } else {
+        console.info(prefix, message);
+      }
+      return;
+    }
+
+    if (level === "error") {
+      console.error(prefix, message, details);
+    } else if (level === "warn") {
+      console.warn(prefix, message, details);
+    } else {
+      console.info(prefix, message, details);
+    }
+  }
+
   async function initializeApp() {
     const savedTheme = localStorage.getItem("essay-theme");
     if (savedTheme === "latte" || savedTheme === "macchiato") {
@@ -88,15 +117,21 @@
     applyTheme(theme);
 
     const savedAccountId = localStorage.getItem("essay-account-id");
+    uiLog("info", "Initializing app", {
+      savedTheme,
+      savedAccountId
+    });
     await loadAccounts(savedAccountId);
   }
 
   async function loadAccounts(savedAccountId: string | null = activeAccountId) {
+    uiLog("info", "Loading accounts", { savedAccountId });
     loadingAccounts = true;
     accountError = "";
 
     try {
       const res = await fetch("/api/v1/accounts");
+      uiLog("info", "Accounts request completed", { status: res.status });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -107,26 +142,31 @@
       if (savedAccountId && data.some((account) => account.accountId.unAccountId === savedAccountId)) {
         activeAccountId = savedAccountId;
         status = `Logged in as ${savedAccountId}`;
+        uiLog("info", "Restored active account", { accountId: savedAccountId });
       } else {
         activeAccountId = null;
         localStorage.removeItem("essay-account-id");
+        uiLog("info", "No saved account restored");
       }
     } catch (err) {
       accountError = `Could not load accounts: ${String(err)}`;
       accounts = [];
       activeAccountId = null;
+      uiLog("error", "Failed to load accounts", err);
     } finally {
       loadingAccounts = false;
     }
   }
 
   function loginAs(accountId: string) {
+    uiLog("info", "Logging in", { accountId });
     activeAccountId = accountId;
     localStorage.setItem("essay-account-id", accountId);
     status = `Logged in as ${accountId}`;
   }
 
   function logout() {
+    uiLog("info", "Logging out", { accountId: activeAccountId });
     activeAccountId = null;
     localStorage.removeItem("essay-account-id");
     status = "Logged out";
@@ -136,6 +176,7 @@
     const trimmed = newAccountName.trim();
     if (!trimmed) {
       accountError = "Please enter an account name.";
+      uiLog("warn", "Create account blocked: empty display name");
       return;
     }
 
@@ -146,6 +187,7 @@
       displayName: trimmed,
       preferredModel: newAccountModel.trim() ? newAccountModel : null
     };
+    uiLog("info", "Creating account", body);
 
     try {
       const res = await fetch("/api/v1/accounts", {
@@ -155,6 +197,7 @@
         },
         body: JSON.stringify(body)
       });
+      uiLog("info", "Create account request completed", { status: res.status });
 
       if (res.status === 409) {
         throw new Error("That account already exists.");
@@ -167,22 +210,26 @@
       accounts = [...accounts, created].sort((a, b) =>
         a.accountId.unAccountId.localeCompare(b.accountId.unAccountId)
       );
+      uiLog("info", "Account created", { accountId: created.accountId.unAccountId });
 
       newAccountName = "";
       loginAs(created.accountId.unAccountId);
     } catch (err) {
       accountError = `Could not create account: ${String(err)}`;
+      uiLog("error", "Failed to create account", err);
     } finally {
       creatingAccount = false;
     }
   }
 
   async function checkBackend() {
+    uiLog("info", "Checking backend readiness");
     loadingReady = true;
     status = "Checking backend";
 
     try {
       const res = await fetch("/api/v1/ready");
+      uiLog("info", "Ready request completed", { status: res.status });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -194,12 +241,18 @@
       backendInstructionCount = data.sampleContext.instructions.length;
       model = data.sampleContext.model ?? model;
       status = "Backend ready";
+      uiLog("info", "Backend ready", {
+        message: data.message,
+        model: data.sampleContext.model,
+        instructionCount: data.sampleContext.instructions.length
+      });
     } catch (err) {
       backendMessage = `Error: ${String(err)}`;
       backendContextTitle = "-";
       backendContextModel = "-";
       backendInstructionCount = 0;
       status = "Backend unavailable";
+      uiLog("error", "Backend ready check failed", err);
     } finally {
       loadingReady = false;
     }
