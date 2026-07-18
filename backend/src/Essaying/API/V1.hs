@@ -8,7 +8,14 @@ where
 
 import Essaying.Handler.Health (HealthResponse, ReadyResponse)
 import Essaying.Types.Account (AccountProfile, CreateAccountRequest, UpdateAccountRequest)
-import Servant (Capture, DeleteNoContent, Get, JSON, Patch, PostCreated, ReqBody, (:<|>) (..), (:>))
+import Essaying.Types.Workspace
+  ( CreateWorkspaceDirectoryRequest
+  , CreateWorkspaceEssayRequest
+  , WorkspaceEssayContent
+  , WorkspaceNode
+  , WorkspaceTreeResponse
+  )
+import Servant (Capture, CaptureAll, DeleteNoContent, Get, JSON, Patch, PostCreated, ReqBody, (:<|>) (..), (:>))
 import Data.Text (Text)
 
 
@@ -23,6 +30,12 @@ type Api =
                 (    Get '[JSON] AccountProfile
                 :<|> ReqBody '[JSON] UpdateAccountRequest :> Patch '[JSON] AccountProfile
                 :<|> DeleteNoContent
+                    :<|> "workspace" :>
+                      (    Get '[JSON] WorkspaceTreeResponse
+                      :<|> "essay" :> CaptureAll "path" Text :> Get '[JSON] WorkspaceEssayContent
+                      :<|> "directories" :> ReqBody '[JSON] CreateWorkspaceDirectoryRequest :> PostCreated '[JSON] WorkspaceNode
+                      :<|> "essays" :> ReqBody '[JSON] CreateWorkspaceEssayRequest :> PostCreated '[JSON] WorkspaceEssayContent
+                      )
                 )
           )
     )

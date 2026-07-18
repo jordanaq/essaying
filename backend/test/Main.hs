@@ -17,6 +17,13 @@ import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Storage (CacheRoot (..))
+import Essaying.Types.Workspace
+  ( CreateWorkspaceDirectoryRequest
+  , CreateWorkspaceEssayRequest
+  , WorkspaceEssayContent
+  , WorkspaceNode
+  , WorkspaceTreeResponse
+  )
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Servant.Client
@@ -38,7 +45,13 @@ healthClient :: ClientM HealthResponse
 readyClient :: ClientM ReadyResponse
 listAccountsClient :: ClientM [AccountProfile]
 createAccountClient :: CreateAccountRequest -> ClientM AccountProfile
-accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent)
+type WorkspaceClientRoutes =
+  ClientM WorkspaceTreeResponse
+    :<|> ([Text] -> ClientM WorkspaceEssayContent)
+    :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
+    :<|> (CreateWorkspaceEssayRequest -> ClientM WorkspaceEssayContent)
+
+accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
 (healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
 
 main :: IO ()
@@ -208,7 +221,7 @@ createAndDeleteAccountEndpoints = TestCase $
               (AccountProfile (AccountId "charlie") "Charlie" (Just "llama3.1:8b"))
               profile
 
-        let getClient :<|> _ :<|> deleteClient = accountByIdClient "charlie"
+        let getClient :<|> _ :<|> deleteClient :<|> _ = accountByIdClient "charlie"
 
         fetched <- runClientM getClient env
         case fetched of

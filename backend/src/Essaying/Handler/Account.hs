@@ -8,6 +8,7 @@ where
 import Data.Text (Text)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
+import Essaying.Handler.Workspace (workspaceHandler)
 import Essaying.Utils (isValidAccountName, slugifyText)
 import Essaying.Persistence.Account
   ( CreateAccountProfileResult (..)
@@ -24,12 +25,25 @@ import Essaying.Types.Account
   , CreateAccountRequest (..)
   , UpdateAccountRequest (..)
   )
+import Essaying.Types.Workspace
+  ( CreateWorkspaceDirectoryRequest
+  , CreateWorkspaceEssayRequest
+  , WorkspaceEssayContent
+  , WorkspaceNode
+  , WorkspaceTreeResponse
+  )
 import Servant (Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
+
+type WorkspaceRoutes =
+  Handler WorkspaceTreeResponse
+    :<|> ([Text] -> Handler WorkspaceEssayContent)
+    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
+    :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
 
 accountHandler ::
   Handler [AccountProfile]
     :<|> (CreateAccountRequest -> Handler AccountProfile)
-    :<|> (Text -> (Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent))
+    :<|> (Text -> (Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent :<|> WorkspaceRoutes))
 accountHandler =
   listAccountsHandler
     :<|> createAccountHandler
@@ -72,11 +86,12 @@ deleteAccountHandler accountIdText = do
     then pure NoContent
     else throwError err404
 
-accountByIdHandler :: Text -> Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent
+accountByIdHandler :: Text -> Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent :<|> WorkspaceRoutes
 accountByIdHandler accountIdText =
   getAccountProfileHandler accountIdText
     :<|> updateAccountProfileHandler accountIdText
     :<|> deleteAccountHandler accountIdText
+    :<|> workspaceHandler accountIdText
 
 getAccountProfileHandler :: Text -> Handler AccountProfile
 getAccountProfileHandler accountIdText = do

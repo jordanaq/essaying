@@ -16,11 +16,13 @@ executable haskell-essaying
     , Essaying.Context
     , Essaying.Handler.Account
     , Essaying.Handler.Health
+    , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
     , Essaying.Server
     , Essaying.Storage
     , Essaying.Types.Account
     , Essaying.Types.Storage
+    , Essaying.Types.Workspace
     , Essaying.Utils
   build-depends:
       base >=4.18 && <5
@@ -49,11 +51,13 @@ test-suite haskell-essaying-test
     , Essaying.API.V1
     , Essaying.Handler.Account
     , Essaying.Handler.Health
+    , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
     , Essaying.Server
     , Essaying.Storage
     , Essaying.Types.Account
     , Essaying.Types.Storage
+    , Essaying.Types.Workspace
     , Essaying.Utils
   build-depends:
       base >=4.18 && <5
