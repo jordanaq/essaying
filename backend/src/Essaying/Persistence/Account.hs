@@ -12,23 +12,38 @@ import Control.Exception (IOException, try)
 import Data.Aeson (decodeFileStrict', encode)
 import Data.List (sort)
 import Essaying.Storage (profileRoot, workspaceRoot)
-import Essaying.Types.Account (AccountProfile)
-import Essaying.Types.Storage (AccountRoot (..), UsersRoot (..), WorkspaceRoot (..))
-import Essaying.Utils (isValidAccountName)
+import Essaying.Types.Account (AccountProfile, AccountId (..), AccountProfile (..))
+import Essaying.Types.Storage (AccountRoot (..), UsersRoot (..), WorkspaceRoot (..), unAccountRoot)
+import Essaying.Utils (isValidAccountName, debug_)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removePathForcibly)
-import System.FilePath (takeDirectory)
+import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
 import qualified Data.ByteString.Lazy as BL
+
+
+debug :: Int -> String -> IO ()
+debug = debug_ "[Account]"
 
 data CreateAccountProfileResult
   = AccountCreated
   | AccountAlreadyExists
   deriving (Eq, Show)
 
+expectedAccountIdText :: AccountRoot -> Text
+expectedAccountIdText accountRoot = Text.pack (takeFileName (unAccountRoot accountRoot))
+
+accountProfileMatchesRoot :: AccountRoot -> AccountProfile -> Bool
+accountProfileMatchesRoot accountRoot (AccountProfile (AccountId accountIdText) _ _) =
+  accountIdText == expectedAccountIdText accountRoot
+
 saveAccountProfile :: AccountRoot -> AccountProfile -> IO ()
 saveAccountProfile accountRoot profile = do
+  if accountProfileMatchesRoot accountRoot profile
+    then pure ()
+    else ioError $ userError "AccountId mismatch: profile accountId does not match account directory"
+
   let profilePath = profileRoot accountRoot
       WorkspaceRoot workspacePath = workspaceRoot accountRoot
 
@@ -61,10 +76,23 @@ readAccountProfile :: AccountRoot -> IO (Maybe AccountProfile)
 readAccountProfile accountRoot = do
   let profilePath = profileRoot accountRoot
 
+  -- Read profile if it exists; treat malformed or inconsistent data as missing.
   exists <- doesFileExist profilePath
-  if not exists
-    then pure Nothing
-    else decodeFileStrict' profilePath
+  profile <- if exists
+    then decodeFileStrict' profilePath
+    else pure Nothing
+
+  case profile of
+    Just decodedProfile
+      | accountProfileMatchesRoot accountRoot decodedProfile -> pure profile
+      | otherwise -> do
+          let AccountProfile (AccountId accountIdText) _ _ = decodedProfile
+              expectedId = expectedAccountIdText accountRoot
+          debug 1 $ "Ignoring profile with mismatched AccountId in " <> profilePath
+            <> ": found=" <> Text.unpack accountIdText
+            <> ", expected=" <> Text.unpack expectedId
+          pure Nothing
+    Nothing -> pure Nothing
 
 getAccountNames :: UsersRoot -> IO [Text]
 getAccountNames (UsersRoot usersRootPath) = do

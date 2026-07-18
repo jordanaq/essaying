@@ -11,7 +11,7 @@ where
 
 import Control.Monad (when)
 import System.Environment (lookupEnv)
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum, isSpace, toLower)
 import Data.Text (Text)
 import qualified Data.Text as Text
 
@@ -32,7 +32,7 @@ toSlugChar c
 
 slugifyText :: Text -> Text
 slugifyText input =
-  let normalized = Text.toLower (Text.strip input)
+  let normalized = Text.map toLower (Text.strip input)
       separatorized = Text.map toSlugChar normalized
       pieces = filter (not . Text.null) (Text.splitOn "-" separatorized)
       rebuilt = Text.intercalate "-" pieces
