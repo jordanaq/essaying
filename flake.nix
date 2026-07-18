@@ -61,10 +61,23 @@
 
               trap cleanup INT TERM EXIT
 
-              (cd backend && "${config.haskellProjects.backend.outputs.packages.haskell-essaying.package}/bin/haskell-essaying" >"$backend_log" 2>&1) &
+              (
+                cd backend
+                HESSAY_HTTP_LOG=1 "${config.haskellProjects.backend.outputs.packages.haskell-essaying.package}/bin/haskell-essaying" 2>&1 \
+                  | sed -u 's/^/[backend] /' \
+                  | tee "$backend_log"
+              ) &
               backend_pid=$!
 
-              (cd frontend && if [ ! -d node_modules ]; then npm install; fi && npm run dev -- --host 127.0.0.1 --port 4173 >"$frontend_log" 2>&1) &
+              (
+                cd frontend
+                if [ ! -d node_modules ]; then
+                  npm install
+                fi
+                npm run dev -- --host 127.0.0.1 --port 4173 2>&1 \
+                  | sed -u 's/^/[frontend] /' \
+                  | tee "$frontend_log"
+              ) &
               frontend_pid=$!
 
               echo "Backend log: $backend_log"
