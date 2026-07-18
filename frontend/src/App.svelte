@@ -21,6 +21,19 @@
     };
   };
 
+  type AccountProfile = {
+    accountId: {
+      unAccountId: string;
+    };
+    displayName: string;
+    preferredModel: string | null;
+  };
+
+  type CreateAccountRequest = {
+    displayName: string;
+    preferredModel: string | null;
+  };
+
   const essays = [
     "History/Project-Alpha/French-Revolution-Outline.md",
     "Literature/Poetry/Romanticism-Draft.md",
@@ -30,6 +43,13 @@
   let selectedEssay = essays[0];
   let markdown = "# Essay Draft\n\nWrite your introduction here.";
   let model = "llama3.1:8b";
+  let accounts: AccountProfile[] = [];
+  let loadingAccounts = false;
+  let creatingAccount = false;
+  let accountError = "";
+  let newAccountName = "";
+  let newAccountModel = "llama3.1:8b";
+  let activeAccountId: string | null = null;
   let gradeStream = "";
   let status = "Idle";
   let backendMessage = "Not fetched";
@@ -52,12 +72,110 @@
   ].join(" ");
 
   onMount(() => {
-    const saved = localStorage.getItem("essay-theme");
-    if (saved === "latte" || saved === "macchiato") {
-      theme = saved;
+    void initializeApp();
+  });
+
+  $: activeAccount =
+    activeAccountId === null
+      ? null
+      : accounts.find((account) => account.accountId.unAccountId === activeAccountId) ?? null;
+
+  async function initializeApp() {
+    const savedTheme = localStorage.getItem("essay-theme");
+    if (savedTheme === "latte" || savedTheme === "macchiato") {
+      theme = savedTheme;
     }
     applyTheme(theme);
-  });
+
+    const savedAccountId = localStorage.getItem("essay-account-id");
+    await loadAccounts(savedAccountId);
+  }
+
+  async function loadAccounts(savedAccountId: string | null = activeAccountId) {
+    loadingAccounts = true;
+    accountError = "";
+
+    try {
+      const res = await fetch("/api/v1/accounts");
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data: AccountProfile[] = await res.json();
+      accounts = data;
+
+      if (savedAccountId && data.some((account) => account.accountId.unAccountId === savedAccountId)) {
+        activeAccountId = savedAccountId;
+        status = `Logged in as ${savedAccountId}`;
+      } else {
+        activeAccountId = null;
+        localStorage.removeItem("essay-account-id");
+      }
+    } catch (err) {
+      accountError = `Could not load accounts: ${String(err)}`;
+      accounts = [];
+      activeAccountId = null;
+    } finally {
+      loadingAccounts = false;
+    }
+  }
+
+  function loginAs(accountId: string) {
+    activeAccountId = accountId;
+    localStorage.setItem("essay-account-id", accountId);
+    status = `Logged in as ${accountId}`;
+  }
+
+  function logout() {
+    activeAccountId = null;
+    localStorage.removeItem("essay-account-id");
+    status = "Logged out";
+  }
+
+  async function createAccount() {
+    const trimmed = newAccountName.trim();
+    if (!trimmed) {
+      accountError = "Please enter an account name.";
+      return;
+    }
+
+    creatingAccount = true;
+    accountError = "";
+
+    const body: CreateAccountRequest = {
+      displayName: trimmed,
+      preferredModel: newAccountModel.trim() ? newAccountModel : null
+    };
+
+    try {
+      const res = await fetch("/api/v1/accounts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (res.status === 409) {
+        throw new Error("That account already exists.");
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const created: AccountProfile = await res.json();
+      accounts = [...accounts, created].sort((a, b) =>
+        a.accountId.unAccountId.localeCompare(b.accountId.unAccountId)
+      );
+
+      newAccountName = "";
+      loginAs(created.accountId.unAccountId);
+    } catch (err) {
+      accountError = `Could not create account: ${String(err)}`;
+    } finally {
+      creatingAccount = false;
+    }
+  }
 
   async function checkBackend() {
     loadingReady = true;
@@ -140,10 +258,92 @@
 </script>
 
 <main>
+  {#if !activeAccount}
+    <div class="login-shell">
+      <div class="topbar">
+        <div>
+          <sl-badge variant="primary" pill>Account login required</sl-badge>
+          <h1>Welcome to Essaying</h1>
+        </div>
+
+        <div class="status-row">
+          <sl-button size="small" variant="default" on:click={toggleTheme}>
+            {theme === "macchiato" ? "Switch to Light" : "Switch to Macchiato"}
+          </sl-button>
+        </div>
+      </div>
+
+      <div class="login-grid">
+        <sl-card>
+          <div slot="header" class="panel-header">
+            <h2>Choose Account</h2>
+            <sl-button size="small" variant="default" on:click={() => loadAccounts()}>
+              Refresh
+            </sl-button>
+          </div>
+
+          {#if loadingAccounts}
+            <div class="login-loading">
+              <sl-spinner></sl-spinner>
+              <span>Loading accounts...</span>
+            </div>
+          {:else if accounts.length === 0}
+            <p class="footer-note">No accounts found yet. Create your first account.</p>
+          {:else}
+            <div class="account-list">
+              {#each accounts as account}
+                <sl-button
+                  variant="default"
+                  on:click={() => loginAs(account.accountId.unAccountId)}
+                >
+                  {account.displayName}
+                </sl-button>
+              {/each}
+            </div>
+          {/if}
+        </sl-card>
+
+        <sl-card>
+          <div slot="header" class="panel-header">
+            <h2>Create Account</h2>
+          </div>
+
+          <div class="meta">
+            <sl-input
+              label="Display Name"
+              value={newAccountName}
+              on:sl-input={(e) => (newAccountName = (e.target as { value?: string }).value ?? "")}
+            ></sl-input>
+
+            <sl-select
+              label="Preferred Model"
+              value={newAccountModel}
+              on:sl-change={(e) => (newAccountModel = (e.target as { value?: string }).value ?? "")}
+            >
+              <sl-option value="llama3.1:8b">llama3.1:8b</sl-option>
+              <sl-option value="qwen2.5:7b">qwen2.5:7b</sl-option>
+              <sl-option value="mistral:7b">mistral:7b</sl-option>
+            </sl-select>
+          </div>
+
+          {#if accountError}
+            <p class="login-error">{accountError}</p>
+          {/if}
+
+          <div class="editor-actions">
+            <sl-button variant="primary" on:click={createAccount} disabled={creatingAccount}>
+              {creatingAccount ? "Creating..." : "Create Account"}
+            </sl-button>
+          </div>
+        </sl-card>
+      </div>
+    </div>
+  {:else}
   <div class="topbar">
     <div>
       <sl-badge variant="primary" pill>Backend-first UI stub</sl-badge>
       <h1>Essaying Workbench</h1>
+      <p class="session-hint">Logged in as {activeAccount.displayName} ({activeAccount.accountId.unAccountId})</p>
     </div>
 
     <div class="status-row">
@@ -155,6 +355,7 @@
         {theme === "macchiato" ? "Switch to Light" : "Switch to Macchiato"}
       </sl-button>
       <sl-button size="small" variant="primary" on:click={checkBackend}>Check API</sl-button>
+      <sl-button size="small" variant="danger" on:click={logout}>Log Out</sl-button>
       {#if anyCollapsed}
         <sl-button size="small" variant="default" on:click={expandAllPanels}>Expand All Panels</sl-button>
       {/if}
@@ -259,4 +460,5 @@
       {/if}
     </sl-card>
   </div>
+  {/if}
 </main>
