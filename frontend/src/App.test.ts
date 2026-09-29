@@ -2,18 +2,52 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
 
-type MockResponse = {
-  ok: boolean;
+type ApiResponse = {
   status: number;
-  json: () => Promise<unknown>;
+  data: unknown;
 };
 
-function jsonResponse(status: number, data: unknown): MockResponse {
+function jsonResponse(status: number, data: unknown): ApiResponse {
   return {
-    ok: status >= 200 && status < 300,
     status,
-    json: async () => data
+    data
   };
+}
+
+function emptyWorkspaceResponse(): ApiResponse {
+  return jsonResponse(200, { tree: [] });
+}
+
+function responseFromApiResponse(response: ApiResponse): Response {
+  return new Response(JSON.stringify(response.data), {
+    status: response.status,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+}
+
+function createApiAwareFetchMock(apiResponses: ApiResponse[]) {
+  let nextApiResponseIndex = 0;
+
+  return vi.fn((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+
+    if (url.startsWith("/api/")) {
+      const response = apiResponses[nextApiResponseIndex] ?? jsonResponse(500, { message: "Unexpected API call" });
+      nextApiResponseIndex += 1;
+      return Promise.resolve(responseFromApiResponse(response));
+    }
+
+    return Promise.resolve(new Response("", { status: 200 }));
+  });
+}
+
+function apiCalls(fetchMock: { mock: { calls: Array<[RequestInfo | URL, RequestInit?]> } }) {
+  return fetchMock.mock.calls.filter(([input]) => {
+    const url = typeof input === "string" ? input : input.toString();
+    return url.startsWith("/api/");
+  });
 }
 
 function getDisplayNameInput(container: HTMLElement): HTMLElement & { value: string } {
@@ -40,14 +74,12 @@ describe("App account login flow", () => {
   });
 
   it("shows login gate with available accounts when logged out", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(200, [
-          { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: "llama3.1:8b" },
-          { accountId: { unAccountId: "bob" }, displayName: "Bob", preferredModel: null }
-        ])
-      );
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, [
+        { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: "llama3.1:8b" },
+        { accountId: { unAccountId: "bob" }, displayName: "Bob", preferredModel: null }
+      ])
+    ]);
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -60,14 +92,14 @@ describe("App account login flow", () => {
   });
 
   it("logs into an account and logs out back to login screen", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse(200, [
-          { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: "llama3.1:8b" }
-        ])
-      )
-    );
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, [
+        { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: "llama3.1:8b" }
+      ]),
+      emptyWorkspaceResponse()
+    ]);
+
+    vi.stubGlobal("fetch", fetchMock);
 
     render(App);
 
@@ -84,16 +116,15 @@ describe("App account login flow", () => {
   });
 
   it("creates an account and logs in on success", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(200, []))
-      .mockResolvedValueOnce(
-        jsonResponse(201, {
-          accountId: { unAccountId: "charlie" },
-          displayName: "Charlie",
-          preferredModel: "llama3.1:8b"
-        })
-      );
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, []),
+      jsonResponse(201, {
+        accountId: { unAccountId: "charlie" },
+        displayName: "Charlie",
+        preferredModel: "llama3.1:8b"
+      }),
+      emptyWorkspaceResponse()
+    ]);
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -115,13 +146,11 @@ describe("App account login flow", () => {
     await fireEvent.click(getCreateAccountActionButton());
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        "/api/v1/accounts",
-        expect.objectContaining({
-          method: "POST"
-        })
-      );
+      expect(
+        apiCalls(fetchMock).some(
+          ([input, init]) => input === "/api/v1/accounts" && init?.method === "POST"
+        )
+      ).toBe(true);
     });
 
     expect(await screen.findByText("Essaying Workbench")).toBeInTheDocument();
@@ -130,10 +159,10 @@ describe("App account login flow", () => {
   });
 
   it("shows duplicate-account error on 409 create response", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(200, []))
-      .mockResolvedValueOnce(jsonResponse(409, { message: "exists" }));
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, []),
+      jsonResponse(409, { message: "exists" })
+    ]);
 
     vi.stubGlobal("fetch", fetchMock);
 

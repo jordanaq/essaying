@@ -1,30 +1,40 @@
 import { expect, test } from "@playwright/test";
 
-test("create account, log in, and log out", async ({ page }) => {
+test("create account, log in, and log out", async ({ page, request }) => {
   const uniqueSuffix = Date.now().toString().slice(-6);
   const displayName = `e2e-user-${uniqueSuffix}`;
   const expectedAccountId = displayName;
+  let createdAccountId: string | null = expectedAccountId;
 
-  await page.goto("/");
+  try {
+    await page.goto("/");
 
-  await expect(page.getByText("Welcome to Essaying")).toBeVisible();
+    await expect(page.getByText("Welcome to Essaying")).toBeVisible();
 
-  const displayNameInput = page.locator("sl-input").first();
-  await expect(displayNameInput).toBeVisible();
-  await displayNameInput.evaluate((el, name) => {
-    const input = el as { value: string; dispatchEvent: (ev: Event) => boolean };
-    input.value = name;
-    input.dispatchEvent(new CustomEvent("sl-input", { bubbles: true, composed: true }));
-  }, displayName);
+    const displayNameInput = page.locator("sl-input").first();
+    await expect(displayNameInput).toBeVisible();
+    await displayNameInput.evaluate((el, name) => {
+      const input = el as { value: string; dispatchEvent: (ev: Event) => boolean };
+      input.value = name;
+      input.dispatchEvent(new CustomEvent("sl-input", { bubbles: true, composed: true }));
+    }, displayName);
 
-  await page
-    .locator('sl-card:has-text("Create Account") sl-button:has-text("Create Account")')
-    .first()
-    .click();
+    await page
+      .locator('sl-card:has-text("Create Account") sl-button:has-text("Create Account")')
+      .first()
+      .click();
 
-  await expect(page.getByText("Essaying Workbench")).toBeVisible();
-  await expect(page.getByText(`Logged in as ${displayName} (${expectedAccountId})`)).toBeVisible();
+    await expect(page.getByText("Essaying Workbench")).toBeVisible();
+    await expect(page.getByText(`Logged in as ${displayName} (${expectedAccountId})`)).toBeVisible();
 
-  await page.getByText("Log Out").click();
-  await expect(page.getByText("Welcome to Essaying")).toBeVisible();
+    await page.getByText("Log Out").click();
+    await expect(page.getByText("Welcome to Essaying")).toBeVisible();
+  } finally {
+    if (createdAccountId) {
+      const cleanupResponse = await request.delete(`/api/v1/accounts/${encodeURIComponent(createdAccountId)}`);
+      if (!cleanupResponse.ok() && cleanupResponse.status() !== 404) {
+        throw new Error(`Cleanup delete failed with HTTP ${cleanupResponse.status()}`);
+      }
+    }
+  }
 });
