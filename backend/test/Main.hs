@@ -13,15 +13,29 @@ import Essaying.API.V1 (Api)
 import Essaying.Context (Context (..))
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
 import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile, readAccountProfile)
+import Essaying.Persistence.Workspace
+  ( CreateWorkspaceDirectoryResult (..)
+  , CreateWorkspaceEssayResult (..)
+  , createWorkspaceDirectory
+  , createWorkspaceEssay
+  , essayFileName
+  , isEssayFile
+  , isSafeSegment
+  , listWorkspaceTree
+  , loadWorkspaceEssay
+  , safeResolvePath
+  , saveWorkspaceEssay
+  )
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
-import Essaying.Types.Storage (CacheRoot (..))
+import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Essaying.Types.Workspace
   ( CreateWorkspaceDirectoryRequest
   , CreateWorkspaceEssayRequest
-  , WorkspaceEssayContent
-  , WorkspaceNode
+  , WorkspaceEssayContent (..)
+  , WorkspaceNode (..)
+  , WorkspaceNodeType (..)
   , WorkspaceTreeResponse
   )
 import Network.HTTP.Client (defaultManagerSettings, newManager)
@@ -73,7 +87,62 @@ tests = TestList
   , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
   , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
   , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
+  , TestLabel "workspace path helpers" workspacePathHelpers
+  , TestLabel "workspace directory and essay persistence" workspacePersistence
   ]
+
+workspacePathHelpers :: Test
+workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  assertEqual "essay filename gets markdown extension" "My Essay.md" (essayFileName "My Essay")
+  assertEqual "markdown files are essays" True (isEssayFile "essay.md")
+  assertEqual "other files are not essays" False (isEssayFile "context.yaml")
+  assertEqual "ordinary segment is safe" True (isSafeSegment "History")
+  assertEqual "empty segment is unsafe" False (isSafeSegment "")
+  assertEqual "dot-dot segment is unsafe" False (isSafeSegment "..")
+  assertEqual "slash-containing segment is unsafe" False (isSafeSegment "a/b")
+  let root = WorkspaceRoot (cachePath </> "workspace")
+      expectedRoot = cachePath </> "workspace"
+  createDirectoryIfMissing True expectedRoot
+  assertEqual "safe path resolves beneath root"
+    (Just (expectedRoot </> "History" </> "Essay.md"))
+    (safeResolvePath root ["History", "Essay.md"])
+  assertEqual "unsafe path is rejected" Nothing (safeResolvePath root ["..", "outside"])
+
+workspacePersistence :: Test
+workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let rootPath = cachePath </> "workspace"
+      workspace = WorkspaceRoot rootPath
+  createDirectoryIfMissing True rootPath
+
+  createdDirectory <- createWorkspaceDirectory workspace [] "History"
+  assertEqual "directory creation returns its node"
+    (WorkspaceDirectoryCreated (WorkspaceNode "History" ["History"] WorkspaceDirectoryNode []))
+    createdDirectory
+  duplicateDirectory <- createWorkspaceDirectory workspace [] "History"
+  assertEqual "duplicate directory is reported" WorkspaceDirectoryAlreadyExists duplicateDirectory
+
+  createdEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" (Just "# Causes\n")
+  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution"] "French-Revolution" "# Causes\n"
+  assertEqual "essay creation returns content" (WorkspaceEssayCreated expectedEssay) createdEssay
+  duplicateEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing
+  assertEqual "duplicate essay is reported" WorkspaceEssayAlreadyExists duplicateEssay
+
+  loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
+  assertEqual "created essay can be loaded" (Just expectedEssay) loadedEssay
+  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] "# Updated\n"
+  assertEqual "existing essay can be saved" True didSave
+  savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
+  assertEqual "saved content can be loaded" (Just (expectedEssay {markdown = "# Updated\n"})) savedEssay
+
+  tree <- listWorkspaceTree workspace
+  assertEqual "tree includes directory and essay"
+    [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
+      [WorkspaceNode "French-Revolution.md" ["History", "French-Revolution.md"] WorkspaceEssayNode []]]
+    tree
+  missingEssay <- loadWorkspaceEssay workspace ["History", "Missing"]
+  assertEqual "missing essay loads as Nothing" Nothing missingEssay
+  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] "nope"
+  assertEqual "missing essay cannot be saved" False savedMissing
 
 healthResponseValue :: Test
 healthResponseValue = TestCase $ do
