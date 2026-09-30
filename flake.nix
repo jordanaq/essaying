@@ -47,6 +47,10 @@
             text = ''
               set -euo pipefail
 
+              pkill -f 'vite --host 127.0.0.1 --port 4173' 2>/dev/null || true
+              pkill -f 'haskell-essaying backend on http://127.0.0.1:8080' 2>/dev/null || true
+              pkill -f 'haskell-essaying/bin/haskell-essaying' 2>/dev/null || true
+
               backend_log=$(mktemp)
               frontend_log=$(mktemp)
 
@@ -172,12 +176,22 @@
             text = ''
               set -euo pipefail
 
+              pkill -f 'vite --host 127.0.0.1 --port 4173' 2>/dev/null || true
+              pkill -f 'haskell-essaying backend on http://127.0.0.1:8080' 2>/dev/null || true
+              pkill -f 'haskell-essaying/bin/haskell-essaying' 2>/dev/null || true
+
               (
                 cd backend
                 nix --accept-flake-config develop -c cabal clean
               )
 
-              echo "Backend build artifacts cleaned."
+              rm -rf frontend/dist
+              rm -rf frontend/node_modules/.vite
+              rm -rf frontend/test-results
+              rm -rf frontend/playwright-report
+              rm -rf frontend/coverage
+
+              echo "Backend and frontend build artifacts cleaned."
             '';
           };
         in {
