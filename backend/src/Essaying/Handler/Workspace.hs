@@ -43,7 +43,7 @@ createWorkspaceDirectoryHandler _ (CreateWorkspaceDirectoryRequest reqParentPath
 
 createWorkspaceEssayHandler :: Text -> CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent
 createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParentPath reqEssayName reqMarkdown) =
-  let essayPath = reqParentPath <> [reqEssayName]
+  let essayPath = reqParentPath <> [reqEssayName <> ".md"]
       essayMarkdown = maybe (stubEssayMarkdown accountIdText essayPath) id reqMarkdown
    in pure $ WorkspaceEssayContent essayPath reqEssayName essayMarkdown
 
@@ -72,7 +72,9 @@ sampleDirectoryNode accountIdText =
 
 titleFromPath :: [Text] -> Text
 titleFromPath [] = "Untitled Essay"
-titleFromPath segments = last segments
+titleFromPath segments =
+  let lastSegment = last segments
+   in maybe lastSegment id (Text.stripSuffix ".md" lastSegment)
 
 stubEssayMarkdown :: Text -> [Text] -> Text
 stubEssayMarkdown accountIdText essayPath =

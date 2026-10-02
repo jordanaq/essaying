@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 
 module Main where
 
@@ -122,16 +123,16 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "duplicate directory is reported" WorkspaceDirectoryAlreadyExists duplicateDirectory
 
   createdEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" (Just "# Causes\n")
-  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution"] "French-Revolution" "# Causes\n"
+  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution.md"] "French-Revolution" "# Causes\n"
   assertEqual "essay creation returns content" (WorkspaceEssayCreated expectedEssay) createdEssay
   duplicateEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing
   assertEqual "duplicate essay is reported" WorkspaceEssayAlreadyExists duplicateEssay
 
-  loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
+  loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
   assertEqual "created essay can be loaded" (Just expectedEssay) loadedEssay
-  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] "# Updated\n"
+  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution.md"] "# Updated\n"
   assertEqual "existing essay can be saved" True didSave
-  savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
+  savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
   assertEqual "saved content can be loaded" (Just (expectedEssay {markdown = "# Updated\n"})) savedEssay
 
   tree <- listWorkspaceTree workspace
@@ -139,9 +140,9 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
       [WorkspaceNode "French-Revolution.md" ["History", "French-Revolution.md"] WorkspaceEssayNode []]]
     tree
-  missingEssay <- loadWorkspaceEssay workspace ["History", "Missing"]
+  missingEssay <- loadWorkspaceEssay workspace ["History", "Missing.md"]
   assertEqual "missing essay loads as Nothing" Nothing missingEssay
-  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] "nope"
+  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing.md"] "nope"
   assertEqual "missing essay cannot be saved" False savedMissing
 
 healthResponseValue :: Test
