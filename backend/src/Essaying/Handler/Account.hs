@@ -31,14 +31,16 @@ import Essaying.Types.Workspace
   , WorkspaceEssayContent
   , WorkspaceNode
   , WorkspaceTreeResponse
+  , SaveWorkspaceEssayRequest
   )
 import Servant (Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
 
 type WorkspaceRoutes =
   Handler WorkspaceTreeResponse
-    :<|> ([Text] -> Handler WorkspaceEssayContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
+    :<|> ([Text] -> (Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)))
     :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
+    :<|> ([Text] -> Handler NoContent)
+    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
 
 accountHandler ::
   Handler [AccountProfile]

@@ -10,6 +10,7 @@ module Essaying.Types.Workspace
   , WorkspaceEssayContent (..)
   , CreateWorkspaceDirectoryRequest (..)
   , CreateWorkspaceEssayRequest (..)
+  , SaveWorkspaceEssayRequest (..)
   )
 where
 
@@ -57,6 +58,12 @@ data CreateWorkspaceEssayRequest = CreateWorkspaceEssayRequest
   { parentPath :: [Text]
   , essayName :: Text
   , markdown :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data SaveWorkspaceEssayRequest = SaveWorkspaceEssayRequest
+  { markdown :: Text
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)

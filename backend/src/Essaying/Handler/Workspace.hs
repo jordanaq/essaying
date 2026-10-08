@@ -5,84 +5,124 @@ module Essaying.Handler.Workspace
   )
 where
 
+import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Essaying.Persistence.Workspace
+  ( CreateWorkspaceDirectoryResult (..)
+  , CreateWorkspaceEssayResult (..)
+  , WorkspaceDeleteError (..)
+  , WorkspaceDeleteResult (..)
+  , createWorkspaceDirectory
+  , createWorkspaceEssay
+  , deleteWorkspaceDirectory
+  , deleteWorkspaceEssay
+  , listWorkspaceTree
+  , loadWorkspaceEssay
+  , saveWorkspaceEssay
+  )
+import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot, workspaceRoot)
+import Essaying.Types.Account (AccountId (..))
 import Essaying.Types.Workspace
   ( CreateWorkspaceDirectoryRequest (..)
   , CreateWorkspaceEssayRequest (..)
   , WorkspaceEssayContent (..)
   , WorkspaceNode (..)
-  , WorkspaceNodeType (..)
   , WorkspaceTreeResponse (..)
+  , SaveWorkspaceEssayRequest (..)
   )
-import Servant (Handler, (:<|>) (..))
+import Essaying.Types.Storage (WorkspaceRoot)
+import Servant (Handler, NoContent (NoContent), err400, err403, err404, err409, throwError, (:<|>) (..))
 
 workspaceHandler ::
   Text ->
   Handler WorkspaceTreeResponse
-    :<|> ([Text] -> Handler WorkspaceEssayContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
+    :<|> ([Text] -> (Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)))
     :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
+    :<|> ([Text] -> Handler NoContent)
+    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
 workspaceHandler accountIdText =
   listWorkspaceTreeHandler accountIdText
-    :<|> loadWorkspaceEssayHandler accountIdText
-    :<|> createWorkspaceDirectoryHandler accountIdText
+    :<|> essayRoutes accountIdText
     :<|> createWorkspaceEssayHandler accountIdText
+    :<|> deleteWorkspaceDirectoryHandler accountIdText
+    :<|> createWorkspaceDirectoryHandler accountIdText
+
+essayRoutes :: Text -> [Text] -> Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)
+essayRoutes accountIdText essayPath =
+  loadWorkspaceEssayHandler accountIdText essayPath
+    :<|> ( saveWorkspaceEssayHandler accountIdText essayPath
+        :<|> deleteWorkspaceEssayHandler accountIdText essayPath
+        )
+
+deleteWorkspaceEssayHandler :: Text -> [Text] -> Handler NoContent
+deleteWorkspaceEssayHandler accountIdText essayPath = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  result <- liftIO $ deleteWorkspaceEssay wsRoot essayPath
+  handleWorkspaceDeleteResult result
+
+deleteWorkspaceDirectoryHandler :: Text -> [Text] -> Handler NoContent
+deleteWorkspaceDirectoryHandler accountIdText directoryPath = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  result <- liftIO $ deleteWorkspaceDirectory wsRoot directoryPath
+  handleWorkspaceDeleteResult result
+
+handleWorkspaceDeleteResult :: WorkspaceDeleteResult -> Handler NoContent
+handleWorkspaceDeleteResult WorkspaceDeleteSucceeded = pure NoContent
+handleWorkspaceDeleteResult (WorkspaceDeleteFailed deleteError) =
+  case deleteError of
+    WorkspaceDeleteInvalidPath _ -> throwError err400
+    WorkspaceDeleteRootDenied -> throwError err400
+    WorkspaceDeleteTargetNotFound _ -> throwError err404
+    WorkspaceDeleteWrongTargetType _ -> throwError err400
+    WorkspaceDeleteSymbolicLink _ -> throwError err403
+
+-- | Resolve the on-disk workspace root for the given account.
+resolveWorkspaceRoot :: Text -> Handler WorkspaceRoot
+resolveWorkspaceRoot accountIdText = do
+  cacheRoot <- liftIO resolveCacheRoot
+  let acctRoot = accountRoot (usersRoot cacheRoot) (AccountId accountIdText)
+  pure $ workspaceRoot acctRoot
 
 listWorkspaceTreeHandler :: Text -> Handler WorkspaceTreeResponse
-listWorkspaceTreeHandler accountIdText =
-  pure $ WorkspaceTreeResponse [sampleDirectoryNode accountIdText]
+listWorkspaceTreeHandler accountIdText = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  nodes <- liftIO $ listWorkspaceTree wsRoot
+  pure $ WorkspaceTreeResponse nodes
 
 loadWorkspaceEssayHandler :: Text -> [Text] -> Handler WorkspaceEssayContent
-loadWorkspaceEssayHandler accountIdText essayPath =
-  pure $ WorkspaceEssayContent essayPath (titleFromPath essayPath) (stubEssayMarkdown accountIdText essayPath)
+loadWorkspaceEssayHandler accountIdText essayPath = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  mContent <- liftIO $ loadWorkspaceEssay wsRoot essayPath
+  case mContent of
+    Nothing -> throwError err404
+    Just content -> pure content
+
+saveWorkspaceEssayHandler :: Text -> [Text] -> SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent
+saveWorkspaceEssayHandler accountIdText essayPath (SaveWorkspaceEssayRequest newMarkdown) = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  didSave <- liftIO $ saveWorkspaceEssay wsRoot essayPath newMarkdown
+  if didSave
+    then do
+      mContent <- liftIO $ loadWorkspaceEssay wsRoot essayPath
+      case mContent of
+        Nothing -> throwError err404
+        Just content -> pure content
+    else throwError err404
 
 createWorkspaceDirectoryHandler :: Text -> CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode
-createWorkspaceDirectoryHandler _ (CreateWorkspaceDirectoryRequest reqParentPath reqDirectoryName) =
-  pure $ WorkspaceNode reqDirectoryName (reqParentPath <> [reqDirectoryName]) WorkspaceDirectoryNode []
+createWorkspaceDirectoryHandler accountIdText (CreateWorkspaceDirectoryRequest reqParentPath reqDirectoryName) = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  result <- liftIO $ createWorkspaceDirectory wsRoot reqParentPath reqDirectoryName
+  case result of
+    WorkspaceDirectoryCreated node -> pure node
+    WorkspaceDirectoryAlreadyExists -> throwError err409
+    WorkspaceDirectoryCreationFailed _ -> throwError err400
 
 createWorkspaceEssayHandler :: Text -> CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent
-createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParentPath reqEssayName reqMarkdown) =
-  let essayPath = reqParentPath <> [reqEssayName <> ".md"]
-      essayMarkdown = maybe (stubEssayMarkdown accountIdText essayPath) id reqMarkdown
-   in pure $ WorkspaceEssayContent essayPath reqEssayName essayMarkdown
-
-sampleDirectoryNode :: Text -> WorkspaceNode
-sampleDirectoryNode accountIdText =
-  WorkspaceNode
-    "History"
-    ["History"]
-    WorkspaceDirectoryNode
-    [ WorkspaceNode
-        "French-Revolution.md"
-        ["History", "French-Revolution.md"]
-        WorkspaceEssayNode
-        []
-    , WorkspaceNode
-        "Notes"
-        ["History", "Notes"]
-        WorkspaceDirectoryNode
-        [ WorkspaceNode
-            (accountIdText <> "-outline.md")
-            ["History", "Notes", accountIdText <> "-outline.md"]
-            WorkspaceEssayNode
-            []
-        ]
-    ]
-
-titleFromPath :: [Text] -> Text
-titleFromPath [] = "Untitled Essay"
-titleFromPath segments =
-  let lastSegment = last segments
-   in maybe lastSegment id (Text.stripSuffix ".md" lastSegment)
-
-stubEssayMarkdown :: Text -> [Text] -> Text
-stubEssayMarkdown accountIdText essayPath =
-  Text.unlines
-    [ "# Stub Essay"
-    , ""
-    , "Account: " <> accountIdText
-    , "Path: " <> Text.intercalate "/" essayPath
-    , ""
-    , "Replace this stub with persistence-backed workspace loading."
-    ]
+createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParentPath reqEssayName reqMarkdown) = do
+  wsRoot <- resolveWorkspaceRoot accountIdText
+  result <- liftIO $ createWorkspaceEssay wsRoot reqParentPath reqEssayName reqMarkdown
+  case result of
+    WorkspaceEssayCreated content -> pure content
+    WorkspaceEssayAlreadyExists -> throwError err409
+    WorkspaceEssayCreationFailed _ -> throwError err400

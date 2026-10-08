@@ -19,6 +19,10 @@ import Essaying.Persistence.Workspace
   , CreateWorkspaceEssayResult (..)
   , createWorkspaceDirectory
   , createWorkspaceEssay
+  , deleteWorkspaceDirectory
+  , deleteWorkspaceEssay
+  , WorkspaceDeleteError (..)
+  , WorkspaceDeleteResult (..)
   , essayFileName
   , isEssayFile
   , isSafeSegment
@@ -28,7 +32,7 @@ import Essaying.Persistence.Workspace
   , saveWorkspaceEssay
   )
 import Essaying.Server (app)
-import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot)
+import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Essaying.Types.Workspace
@@ -38,6 +42,7 @@ import Essaying.Types.Workspace
   , WorkspaceNode (..)
   , WorkspaceNodeType (..)
   , WorkspaceTreeResponse
+  , SaveWorkspaceEssayRequest
   )
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
@@ -50,10 +55,11 @@ import Servant.Client
   , runClientM
   )
 import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, getCurrentDirectory, getHomeDirectory, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, createFileLink, doesDirectoryExist, getCurrentDirectory, getHomeDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Exit (exitFailure)
 import System.FilePath ((</>), normalise, takeDirectory)
-import Test.HUnit (Test (..), assertEqual, assertFailure, runTestTT)
+import Test.HUnit (Counts (..), Test (..), assertEqual, assertFailure, runTestTT)
 import qualified Data.ByteString.Lazy as BL
 
 healthClient :: ClientM HealthResponse
@@ -62,17 +68,18 @@ listAccountsClient :: ClientM [AccountProfile]
 createAccountClient :: CreateAccountRequest -> ClientM AccountProfile
 type WorkspaceClientRoutes =
   ClientM WorkspaceTreeResponse
-    :<|> ([Text] -> ClientM WorkspaceEssayContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
+    :<|> ([Text] -> (ClientM WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> ClientM WorkspaceEssayContent) :<|> ClientM NoContent)))
     :<|> (CreateWorkspaceEssayRequest -> ClientM WorkspaceEssayContent)
+    :<|> ([Text] -> ClientM NoContent)
+    :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
 
 accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
 (healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
 
 main :: IO ()
 main = do
-  _ <- runTestTT tests
-  pure ()
+  counts <- runTestTT tests
+  if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
 tests :: Test
 tests = TestList
@@ -90,6 +97,7 @@ tests = TestList
   , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
   , TestLabel "workspace path helpers" workspacePathHelpers
   , TestLabel "workspace directory and essay persistence" workspacePersistence
+  , TestLabel "workspace delete endpoints" workspaceDeleteEndpoints
   ]
 
 workspacePathHelpers :: Test
@@ -140,10 +148,87 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
       [WorkspaceNode "French-Revolution.md" ["History", "French-Revolution.md"] WorkspaceEssayNode []]]
     tree
+  writeFile (rootPath </> "History" </> "context.yaml") "private context"
+  invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.yaml"]
+  assertEqual "non-essay target is distinguished"
+    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "context.yaml"]))
+    invalidEssayDelete
+  missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing.md"]
+  assertEqual "missing essay is distinguished"
+    (WorkspaceDeleteFailed (WorkspaceDeleteTargetNotFound ["History", "Missing.md"]))
+    missingEssayDelete
+  invalidPathDelete <- deleteWorkspaceEssay workspace ["..", "outside.md"]
+  assertEqual "invalid essay path is distinguished"
+    (WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath ["..", "outside.md"]))
+    invalidPathDelete
+  essayDirectoryDelete <- deleteWorkspaceEssay workspace ["History"]
+  assertEqual "essay delete identifies directory targets"
+    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History"]))
+    essayDirectoryDelete
+  directoryEssayDelete <- deleteWorkspaceDirectory workspace ["History", "French-Revolution.md"]
+  assertEqual "directory delete identifies file targets"
+    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "French-Revolution.md"]))
+    directoryEssayDelete
+  rootDelete <- deleteWorkspaceDirectory workspace []
+  assertEqual "workspace root deletion is denied"
+    (WorkspaceDeleteFailed WorkspaceDeleteRootDenied)
+    rootDelete
+  let outsideFile = cachePath </> "outside.md"
+      linkedEssay = rootPath </> "History" </> "linked.md"
+  writeFile outsideFile "outside workspace"
+  createFileLink outsideFile linkedEssay
+  symlinkDelete <- deleteWorkspaceEssay workspace ["History", "linked.md"]
+  assertEqual "essay symlink failure reports its exact path"
+    (WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink ["History", "linked.md"]))
+    symlinkDelete
+  removeFile linkedEssay
+  didDeleteEssay <- deleteWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  assertEqual "existing essay deletion succeeds" WorkspaceDeleteSucceeded didDeleteEssay
+  essayAfterDelete <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  assertEqual "deleted essay no longer loads" Nothing essayAfterDelete
+  _ <- createWorkspaceDirectory workspace ["History"] "Notes"
+  _ <- createWorkspaceEssay workspace ["History", "Notes"] "Nested" (Just "# Nested\n")
+  didDeleteDirectory <- deleteWorkspaceDirectory workspace ["History"]
+  assertEqual "recursive directory deletion succeeds" WorkspaceDeleteSucceeded didDeleteDirectory
+  directoryAfterDelete <- doesDirectoryExist (rootPath </> "History")
+  assertEqual "deleted directory is gone" False directoryAfterDelete
   missingEssay <- loadWorkspaceEssay workspace ["History", "Missing.md"]
   assertEqual "missing essay loads as Nothing" Nothing missingEssay
   savedMissing <- saveWorkspaceEssay workspace ["History", "Missing.md"] "nope"
   assertEqual "missing essay cannot be saved" False savedMissing
+
+workspaceDeleteEndpoints :: Test
+workspaceDeleteEndpoints = TestCase $
+  withEphemeralCacheRoot $ \cachePath -> do
+    let accountId = AccountId "delete-test"
+        wsRoot = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) accountId)
+    createDirectoryIfMissing True (unWorkspaceRoot wsRoot)
+    _ <- createWorkspaceEssay wsRoot [] "Remove Me" (Just "# Temporary\n")
+    _ <- createWorkspaceDirectory wsRoot [] "History"
+    _ <- createWorkspaceEssay wsRoot ["History"] "Nested" (Just "# Nested\n")
+
+    withEnvVar "HESSAY_CACHE" (Just cachePath) $
+      testWithApplication (pure app) $ \port -> do
+        manager <- newManager defaultManagerSettings
+        let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+            _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "delete-test"
+            _ :<|> essayRoutes :<|> _ :<|> deleteDirectory :<|> _ = workspaceRoutes
+            _ :<|> (_ :<|> deleteEssay) = essayRoutes ["Remove Me.md"]
+
+        essayResult <- runClientM deleteEssay env
+        case essayResult of
+          Left err -> assertFailure ("essay delete endpoint failed: " <> show err)
+          Right noContent -> assertEqual "essay delete returns NoContent" NoContent noContent
+
+        directoryResult <- runClientM (deleteDirectory ["History"]) env
+        case directoryResult of
+          Left err -> assertFailure ("directory delete endpoint failed: " <> show err)
+          Right noContent -> assertEqual "directory delete returns NoContent" NoContent noContent
+
+        deletedEssay <- loadWorkspaceEssay wsRoot ["Remove Me.md"]
+        assertEqual "essay endpoint removes the requested file" Nothing deletedEssay
+        nestedEssay <- loadWorkspaceEssay wsRoot ["History", "Nested.md"]
+        assertEqual "directory endpoint removes nested essays" Nothing nestedEssay
 
 healthResponseValue :: Test
 healthResponseValue = TestCase $ do

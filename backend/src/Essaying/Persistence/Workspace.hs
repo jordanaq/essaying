@@ -4,12 +4,16 @@ module Essaying.Persistence.Workspace
   ( -- * Result types
     CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayResult (..)
+  , WorkspaceDeleteError (..)
+  , WorkspaceDeleteResult (..)
     -- * Workspace operations
   , listWorkspaceTree
   , loadWorkspaceEssay
   , createWorkspaceDirectory
   , createWorkspaceEssay
   , saveWorkspaceEssay
+  , deleteWorkspaceEssay
+  , deleteWorkspaceDirectory
     -- * Path helpers (internal, exported for testing)
   , safeResolvePath
   , isSafeSegment
@@ -29,7 +33,7 @@ import Essaying.Types.Workspace
 import Essaying.Utils (debug_)
 import Control.Monad (forM)
 import Data.Maybe (catMaybes, fromJust)
-import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory)
+import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, pathIsSymbolicLink, removeFile, removeDirectoryRecursive)
 import System.FilePath ((</>), dropExtension)
 
 
@@ -49,6 +53,19 @@ data CreateWorkspaceEssayResult
   = WorkspaceEssayCreated WorkspaceEssayContent
   | WorkspaceEssayAlreadyExists
   | WorkspaceEssayCreationFailed Text
+  deriving (Eq, Show)
+
+data WorkspaceDeleteError
+  = WorkspaceDeleteInvalidPath [Text]
+  | WorkspaceDeleteRootDenied
+  | WorkspaceDeleteTargetNotFound [Text]
+  | WorkspaceDeleteWrongTargetType [Text]
+  | WorkspaceDeleteSymbolicLink [Text]
+  deriving (Eq, Show)
+
+data WorkspaceDeleteResult
+  = WorkspaceDeleteSucceeded
+  | WorkspaceDeleteFailed WorkspaceDeleteError
   deriving (Eq, Show)
 
 
@@ -216,3 +233,42 @@ saveWorkspaceEssay workspaceRoot essayPath newMarkdown
               return True
             else return False
         Nothing -> return False
+
+deleteWorkspaceEssay :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult
+deleteWorkspaceEssay workspaceRoot essayPath
+  | null essayPath = pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath essayPath)
+  | not (isEssayFile (Text.unpack (last essayPath))) =
+      pure $ WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType essayPath)
+  | otherwise =
+      case safeResolvePath workspaceRoot essayPath of
+        Nothing -> pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath essayPath)
+        Just path -> do
+          exists <- doesFileExist path
+          if not exists
+            then do
+              isDirectory <- doesDirectoryExist path
+              pure $ WorkspaceDeleteFailed
+                (if isDirectory then WorkspaceDeleteWrongTargetType essayPath else WorkspaceDeleteTargetNotFound essayPath)
+            else do
+              isSymlink <- pathIsSymbolicLink path
+              if isSymlink
+                then pure $ WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink essayPath)
+                else removeFile path >> pure WorkspaceDeleteSucceeded
+
+deleteWorkspaceDirectory :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult
+deleteWorkspaceDirectory _ [] = pure $ WorkspaceDeleteFailed WorkspaceDeleteRootDenied
+deleteWorkspaceDirectory workspaceRoot dirPath =
+  case safeResolvePath workspaceRoot dirPath of
+    Nothing -> pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath dirPath)
+    Just path -> do
+      exists <- doesDirectoryExist path
+      if not exists
+        then do
+          isFile <- doesFileExist path
+          pure $ WorkspaceDeleteFailed
+            (if isFile then WorkspaceDeleteWrongTargetType dirPath else WorkspaceDeleteTargetNotFound dirPath)
+        else do
+          isSymlink <- pathIsSymbolicLink path
+          if isSymlink
+            then pure $ WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink dirPath)
+            else removeDirectoryRecursive path >> pure WorkspaceDeleteSucceeded
