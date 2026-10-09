@@ -37,7 +37,7 @@
                 npm install
               fi
 
-              exec npm run dev -- --host 127.0.0.1 --port 4173
+              exec ./node_modules/.bin/vite --host 127.0.0.1 --port 4173
             '';
           };
 
@@ -51,46 +51,38 @@
               pkill -f 'haskell-essaying backend on http://127.0.0.1:8080' 2>/dev/null || true
               pkill -f 'haskell-essaying/bin/haskell-essaying' 2>/dev/null || true
 
-              backend_log=$(mktemp)
-              frontend_log=$(mktemp)
-
               cleanup() {
                 if [ -n "''${backend_pid:-}" ]; then
                   kill "$backend_pid" 2>/dev/null || true
+                  wait "$backend_pid" 2>/dev/null || true
                 fi
                 if [ -n "''${frontend_pid:-}" ]; then
                   kill "$frontend_pid" 2>/dev/null || true
+                  wait "$frontend_pid" 2>/dev/null || true
                 fi
               }
 
-              trap cleanup INT TERM EXIT
+              trap 'exit 130' INT
+              trap 'exit 143' TERM
+              trap cleanup EXIT
+
+              if [ ! -d frontend/node_modules ]; then
+                (cd frontend && npm install)
+              fi
 
               (
                 cd backend
-                HESSAY_HTTP_LOG=1 "${config.haskellProjects.backend.outputs.packages.haskell-essaying.package}/bin/haskell-essaying" 2>&1 \
-                  | sed -u 's/^/[backend] /' \
-                  | tee "$backend_log"
+                exec env HESSAY_HTTP_LOG=1 "${config.haskellProjects.backend.outputs.packages.haskell-essaying.package}/bin/haskell-essaying"
               ) &
               backend_pid=$!
 
               (
                 cd frontend
-                if [ ! -d node_modules ]; then
-                  npm install
-                fi
-                npm run dev -- --host 127.0.0.1 --port 4173 2>&1 \
-                  | sed -u 's/^/[frontend] /' \
-                  | tee "$frontend_log"
+                exec ./node_modules/.bin/vite --host 127.0.0.1 --port 4173
               ) &
               frontend_pid=$!
 
-              echo "Backend log: $backend_log"
-              echo "Frontend log: $frontend_log"
               wait -n "$backend_pid" "$frontend_pid"
-              exit_code=$?
-
-              cleanup
-              exit "$exit_code"
             '';
           };
 
