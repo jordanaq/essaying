@@ -55,7 +55,7 @@ import Servant.Client
   , runClientM
   )
 import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
-import System.Directory (createDirectoryIfMissing, createFileLink, doesDirectoryExist, getCurrentDirectory, getHomeDirectory, removeFile, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, createFileLink, doesDirectoryExist, getCurrentDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (exitFailure)
 import System.FilePath ((</>), normalise, takeDirectory)
@@ -269,12 +269,14 @@ readyResponseJson = TestCase $ do
   assertEqual "ready response JSON should round-trip" expected (decode (encode response))
 
 resolveCacheRootFallback :: Test
-resolveCacheRootFallback = TestCase $ do
-  home <- getHomeDirectory
-  let expected = normalise (home </> ".cache" </> "hessaying")
-  withEnvVar "HESSAY_CACHE" Nothing $ do
-    CacheRoot resolved <- resolveCacheRoot
-    assertEqual "fallback should resolve to ~/.cache/hessaying" expected resolved
+resolveCacheRootFallback = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let home = cachePath </> "home"
+      expected = normalise (home </> ".cache" </> "hessaying")
+  createDirectoryIfMissing True home
+  withEnvVar "HOME" (Just home) $
+    withEnvVar "HESSAY_CACHE" Nothing $ do
+      CacheRoot resolved <- resolveCacheRoot
+      assertEqual "fallback should resolve to ~/.cache/hessaying" expected resolved
 
 resolveCacheRootEnvOverride :: Test
 resolveCacheRootEnvOverride = TestCase $ do
@@ -316,9 +318,13 @@ readyEndpoint = TestCase $
         assertEqual "ready endpoint sample context" mempty (sampleContext response)
 
 listAccountsEndpointWithSampleCache :: Test
-listAccountsEndpointWithSampleCache = TestCase $ do
-  sampleCachePath <- resolveSampleCachePath
-  withEnvVar "HESSAY_CACHE" (Just sampleCachePath) $
+listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let expectedProfiles =
+        [ AccountProfile (AccountId "alice") "Alice" (Just "llama3.1:8b")
+        , AccountProfile (AccountId "bob") "Bob" Nothing
+        ]
+  mapM_ (writeAccountProfileFixture cachePath) expectedProfiles
+  withEnvVar "HESSAY_CACHE" (Just cachePath) $
     testWithApplication (pure app) $ \port -> do
       manager <- newManager defaultManagerSettings
       let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
@@ -326,33 +332,26 @@ listAccountsEndpointWithSampleCache = TestCase $ do
       case result of
         Left err -> assertFailure (show err)
         Right profiles -> do
-          let expectedProfiles =
-                [ AccountProfile (AccountId "alice") "Alice" (Just "llama3.1:8b")
-                , AccountProfile (AccountId "bob") "Bob" Nothing
-                ]
-              sortProfiles = sortOn (unAccountId . accountId)
+          let sortProfiles = sortOn (unAccountId . accountId)
           assertEqual "list accounts endpoint should return fixture accounts"
             (sortProfiles expectedProfiles)
             (sortProfiles profiles)
 
-resolveSampleCachePath :: IO FilePath
-resolveSampleCachePath = do
-  cwd <- getCurrentDirectory
-  let direct = normalise (cwd </> "data" </> "sample" </> "cache")
-      monorepo = normalise (cwd </> "backend" </> "data" </> "sample" </> "cache")
-
-  directExists <- doesDirectoryExist direct
-  if directExists
-    then pure direct
-    else pure monorepo
+writeAccountProfileFixture :: FilePath -> AccountProfile -> IO ()
+writeAccountProfileFixture cachePath profile = do
+  let acctRoot = accountRoot (usersRoot (CacheRoot cachePath)) (accountId profile)
+      path = profileRoot acctRoot
+  createDirectoryIfMissing True (takeDirectory path)
+  BL.writeFile path (encode profile)
 
 createAccountProfileDuplicate :: Test
-createAccountProfileDuplicate = TestCase $ do
-  sampleCachePath <- resolveSampleCachePath
+createAccountProfileDuplicate = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let acctId = AccountId "alice"
       profile = AccountProfile acctId "Alice" (Just "llama3.1:8b")
-      acctRoot = accountRoot (usersRoot (CacheRoot sampleCachePath)) acctId
+      acctRoot = accountRoot (usersRoot (CacheRoot cachePath)) acctId
 
+  firstCreate <- createAccountProfile acctRoot profile
+  assertEqual "first account create should succeed" AccountCreated firstCreate
   result <- createAccountProfile acctRoot profile
   assertEqual "duplicate account create should be rejected"
     AccountAlreadyExists
