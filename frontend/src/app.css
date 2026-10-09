@@ -164,13 +164,171 @@ h3 {
   align-items: center;
 }
 
-.tree {
-  display: grid;
-  gap: 8px;
+.tree-panel-header {
+  align-items: flex-start;
 }
 
-.tree button {
-  text-align: left;
+.tree-panel-header > div:first-child {
+  min-width: 0;
+}
+
+.tree-panel-header.is-tree-collapsed {
+  justify-content: center;
+}
+
+.tree-panel-header.is-tree-collapsed > div:first-child {
+  display: none;
+}
+
+.tree-panel-header.is-tree-collapsed .tree-toolbar {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.tree-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid color-mix(in oklab, var(--ctp-surface2) 58%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--ctp-mantle) 74%, transparent);
+}
+
+.tree-toolbar sl-icon-button::part(base) {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  color: var(--ctp-subtext1);
+}
+
+.tree-panel-header.is-tree-collapsed .tree-toolbar sl-icon-button::part(base) {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+}
+
+.tree-toolbar sl-icon-button::part(base):hover {
+  background: color-mix(in oklab, var(--ctp-surface2) 55%, transparent);
+  color: var(--ctp-rosewater);
+}
+
+sl-tree {
+  display: block;
+  margin: 8px 0 14px;
+  --indent-size: 14px;
+  --indent-guide-width: 1px;
+  --indent-guide-color: color-mix(in oklab, var(--ctp-surface2) 65%, transparent);
+}
+
+sl-tree-item::part(item) {
+  min-height: 28px;
+  border-radius: 4px;
+}
+
+sl-tree-item::part(label) {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+sl-tree-item .tree-item-content {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+sl-tree-item .tree-item-name {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+sl-tree-item .tree-item-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 1px;
+  margin-left: 8px;
+}
+
+sl-tree-item .tree-item-actions sl-icon-button::part(base) {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  color: var(--ctp-subtext1);
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+sl-tree-item:hover .tree-item-actions sl-icon-button::part(base),
+sl-tree-item:focus-within .tree-item-actions sl-icon-button::part(base),
+sl-tree-item[selected] .tree-item-actions sl-icon-button::part(base),
+sl-tree-item.workspace-root .tree-item-actions sl-icon-button::part(base) {
+  opacity: 1;
+}
+
+sl-tree-item .tree-item-actions sl-icon-button::part(base):hover {
+  background: color-mix(in oklab, var(--ctp-rosewater) 18%, var(--ctp-surface1));
+  color: var(--ctp-rosewater);
+}
+
+sl-tree-item.workspace-root .tree-item-name {
+  font-weight: 600;
+}
+
+sl-tree-item::part(item--selected) {
+  background: color-mix(in oklab, var(--ctp-rosewater) 22%, var(--ctp-surface1));
+}
+
+sl-tree-item .folder-icon,
+sl-tree-item .file-icon {
+  position: relative;
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  margin-right: 7px;
+  vertical-align: -1px;
+}
+
+sl-tree-item .folder-icon {
+  height: 9px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--ctp-rosewater);
+}
+
+sl-tree-item .folder-icon::before {
+  position: absolute;
+  top: -3px;
+  left: 1px;
+  width: 6px;
+  height: 4px;
+  border-radius: 2px 2px 0 0;
+  background: var(--ctp-rosewater);
+  content: "";
+}
+
+sl-tree-item .file-icon {
+  width: 10px;
+  height: 13px;
+  border: 1px solid var(--ctp-subtext0);
+  border-radius: 2px;
+}
+
+sl-tree-item .file-icon::after {
+  position: absolute;
+  right: 1px;
+  bottom: 3px;
+  left: 1px;
+  border-top: 1px solid var(--ctp-subtext0);
+  content: "";
 }
 
 .meta {
@@ -259,6 +417,12 @@ sl-button[variant="default"]::part(base):hover {
 sl-button[variant="primary"]::part(base) {
   color: var(--app-primary-fg);
   font-weight: 600;
+}
+
+.create-dialog-location {
+  margin: 0 0 12px;
+  color: var(--ctp-subtext0);
+  font-size: 0.9rem;
 }
 
 @media (max-width: 1100px) {

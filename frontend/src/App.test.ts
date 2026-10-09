@@ -115,6 +115,85 @@ describe("App account login flow", () => {
     expect(localStorage.getItem("essay-account-id")).toBeNull();
   });
 
+  it("renders nested folders and selects the active essay in the workspace tree", async () => {
+    localStorage.setItem("essay-account-id", "alice");
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, [
+        { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: null }
+      ]),
+      jsonResponse(200, {
+        tree: [
+          {
+            name: "History",
+            path: ["History"],
+            nodeType: "WorkspaceDirectoryNode",
+            children: [
+              {
+                name: "French Revolution",
+                path: ["History", "French Revolution"],
+                nodeType: "WorkspaceDirectoryNode",
+                children: [
+                  {
+                    name: "notes.md",
+                    path: ["History", "French Revolution", "notes.md"],
+                    nodeType: "WorkspaceEssayNode",
+                    children: []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }),
+      jsonResponse(200, {
+        path: ["History", "French Revolution", "notes.md"],
+        title: "notes.md",
+        markdown: "# Notes"
+      }),
+      jsonResponse(200, {
+        path: ["History", "French Revolution", "notes.md"],
+        title: "notes.md",
+        markdown: "# Updated notes"
+      })
+    ]);
+
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(App);
+
+    const historyItem = await waitFor(() => {
+      const item = container.querySelector('sl-tree-item[data-path="[\\"History\\"]"]');
+      expect(item).not.toBeNull();
+      return item as HTMLElement;
+    });
+    const essayItem = container.querySelector(
+      'sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\",\\"notes.md\\"]"]'
+    );
+    expect(essayItem).not.toBeNull();
+    expect(historyItem).toHaveAttribute("expanded");
+    expect(essayItem).toHaveAttribute("selected");
+    expect(essayItem?.parentElement).toBe(
+      container.querySelector('sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\"]"]')
+    );
+
+    const editor = container.querySelector("sl-textarea") as (HTMLElement & { value: string }) | null;
+    if (!editor) {
+      throw new Error("Essay editor not found");
+    }
+    editor.value = "# Updated notes";
+    await fireEvent(editor, new CustomEvent("sl-input", { bubbles: true, composed: true }));
+    await fireEvent.click(screen.getByText("Save Draft"));
+
+    await waitFor(() => {
+      const saveCall = apiCalls(fetchMock).find(([input, init]) => {
+        const url = typeof input === "string" ? input : input.toString();
+        return url.endsWith("/workspace/essays/History/French%20Revolution/notes.md") && init?.method === "PUT";
+      });
+      expect(saveCall).toBeDefined();
+      expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ markdown: "# Updated notes" });
+    });
+    expect(await screen.findByText("Draft saved for History/French Revolution/notes.md")).toBeInTheDocument();
+  });
+
   it("creates an account and logs in on success", async () => {
     const fetchMock = createApiAwareFetchMock([
       jsonResponse(200, []),

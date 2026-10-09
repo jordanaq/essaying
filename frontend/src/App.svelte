@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
   import "@shoelace-style/shoelace/dist/components/badge/badge.js";
   import "@shoelace-style/shoelace/dist/components/button/button.js";
   import "@shoelace-style/shoelace/dist/components/card/card.js";
   import "@shoelace-style/shoelace/dist/components/details/details.js";
+  import "@shoelace-style/shoelace/dist/components/dialog/dialog.js";
   import "@shoelace-style/shoelace/dist/components/input/input.js";
   import "@shoelace-style/shoelace/dist/components/option/option.js";
   import "@shoelace-style/shoelace/dist/components/select/select.js";
@@ -34,17 +36,6 @@
     preferredModel: string | null;
   };
 
-  type WorkspaceNodeType =
-    | { tag: "WorkspaceDirectoryNode" }
-    | { tag: "WorkspaceEssayNode" };
-
-  type WorkspaceNode = {
-    name: string;
-    path: string[];
-    nodeType: WorkspaceNodeType;
-    children: WorkspaceNode[];
-  };
-
   type WorkspaceTreeResponse = {
     tree: WorkspaceNode[];
   };
@@ -66,17 +57,15 @@
     markdown: string | null;
   };
 
-  type WorkspaceDisplayItem = {
-    name: string;
-    path: string[];
-    depth: number;
-    nodeType: WorkspaceNodeType;
+  type SaveWorkspaceEssayRequest = {
+    markdown: string;
   };
 
   type UiLogLevel = "info" | "warn" | "error";
   const uiLoggingEnabled = import.meta.env.MODE !== "test";
 
   let workspaceTree: WorkspaceNode[] = [];
+  let expandedWorkspaceDirectories: string[][] = [];
   let workspaceLoading = false;
   let workspaceError = "";
   let selectedWorkspaceDirectoryPath: string[] = [];
@@ -97,8 +86,13 @@
   let backendContextModel = "-";
   let backendInstructionCount = 0;
   let loadingReady = false;
-  let newWorkspaceDirectoryName = "";
-  let newWorkspaceEssayName = "";
+  let workspaceCreateKind: "folder" | "essay" | null = null;
+  let workspaceCreateParentPath: string[] = [];
+  let workspaceCreateName = "";
+  let workspaceCreateBusy = false;
+  let workspaceDeleteTarget: WorkspaceNode | null = null;
+  let workspaceDeleteBusy = false;
+  let savingDraft = false;
   let theme: "macchiato" | "latte" = "macchiato";
   let panelState = {
     tree: true,
@@ -212,13 +206,15 @@
 
   function resetWorkspaceState() {
     workspaceTree = [];
+    expandedWorkspaceDirectories = [];
     workspaceLoading = false;
     workspaceError = "";
     selectedWorkspaceDirectoryPath = [];
     selectedWorkspaceEssay = null;
     markdown = "# Essay Draft\n\nWrite your introduction here.";
-    newWorkspaceDirectoryName = "";
-    newWorkspaceEssayName = "";
+    workspaceCreateKind = null;
+    workspaceCreateName = "";
+    workspaceDeleteTarget = null;
   }
 
   async function loadWorkspace(accountId: string) {
@@ -241,8 +237,10 @@
           : findFirstEssayPath(workspaceTree);
 
       if (preferredPath) {
+        expandedWorkspaceDirectories = directoryAncestors(preferredPath);
         await loadWorkspaceEssay(accountId, preferredPath, false);
       } else {
+        expandedWorkspaceDirectories = [];
         selectedWorkspaceDirectoryPath = [];
         selectedWorkspaceEssay = null;
       }
@@ -266,7 +264,7 @@
     }
 
     try {
-      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace/essay/${encodedPath}`);
+      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace/essays/${encodedPath}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -283,19 +281,19 @@
     }
   }
 
-  async function createWorkspaceDirectory() {
-    const directoryName = newWorkspaceDirectoryName.trim();
+  async function createWorkspaceDirectory(parentPath: string[], inputName: string): Promise<boolean> {
+    const directoryName = inputName.trim();
     if (!activeAccountId) {
       workspaceError = "Please log in first.";
-      return;
+      return false;
     }
     if (!directoryName) {
       workspaceError = "Please enter a folder name.";
-      return;
+      return false;
     }
 
     const body: CreateWorkspaceDirectoryRequest = {
-      parentPath: selectedWorkspaceDirectoryPath,
+      parentPath,
       directoryName
     };
 
@@ -317,29 +315,31 @@
 
       const created: WorkspaceNode = await res.json();
       workspaceTree = insertWorkspaceNode(workspaceTree, body.parentPath, created);
+      expandWorkspaceDirectory(body.parentPath);
       selectedWorkspaceDirectoryPath = created.path;
-      newWorkspaceDirectoryName = "";
       status = `Created folder ${created.name}`;
       uiLog("info", "Workspace directory created", { path: created.path });
+      return true;
     } catch (err) {
       workspaceError = `Could not create folder: ${String(err)}`;
       uiLog("error", "Failed to create workspace directory", err);
+      return false;
     }
   }
 
-  async function createWorkspaceEssay() {
-    const essayName = newWorkspaceEssayName.trim();
+  async function createWorkspaceEssay(parentPath: string[], inputName: string): Promise<boolean> {
+    const essayName = inputName.trim();
     if (!activeAccountId) {
       workspaceError = "Please log in first.";
-      return;
+      return false;
     }
     if (!essayName) {
       workspaceError = "Please enter an essay name.";
-      return;
+      return false;
     }
 
     const body: CreateWorkspaceEssayRequest = {
-      parentPath: selectedWorkspaceDirectoryPath,
+      parentPath,
       essayName,
       markdown: markdown.trim() ? markdown : null
     };
@@ -361,6 +361,7 @@
       }
 
       const created: WorkspaceEssayContent = await res.json();
+      expandWorkspaceDirectory(body.parentPath);
       selectedWorkspaceEssay = created;
       selectedWorkspaceDirectoryPath = created.path.slice(0, -1);
       markdown = created.markdown;
@@ -370,12 +371,72 @@
         nodeType: { tag: "WorkspaceEssayNode" },
         children: []
       });
-      newWorkspaceEssayName = "";
       status = `Created essay ${created.title}`;
       uiLog("info", "Workspace essay created", { path: created.path });
+      return true;
     } catch (err) {
       workspaceError = `Could not create essay: ${String(err)}`;
       uiLog("error", "Failed to create workspace essay", err);
+      return false;
+    }
+  }
+
+  function openWorkspaceCreate(kind: "folder" | "essay", parentPath: string[]) {
+    workspaceCreateKind = kind;
+    workspaceCreateParentPath = parentPath;
+    workspaceCreateName = "";
+    workspaceError = "";
+  }
+
+  function openWorkspaceDelete(node: WorkspaceNode) {
+    workspaceDeleteTarget = node;
+    workspaceError = "";
+  }
+
+  async function submitWorkspaceCreate() {
+    workspaceCreateBusy = true;
+    const created = workspaceCreateKind === "folder"
+      ? await createWorkspaceDirectory(workspaceCreateParentPath, workspaceCreateName)
+      : workspaceCreateKind === "essay"
+        ? await createWorkspaceEssay(workspaceCreateParentPath, workspaceCreateName)
+        : false;
+    workspaceCreateBusy = false;
+
+    if (created) {
+      workspaceCreateKind = null;
+      workspaceCreateName = "";
+    }
+  }
+
+  async function deleteWorkspaceItem() {
+    if (!activeAccountId || !workspaceDeleteTarget) {
+      return;
+    }
+
+    const target = workspaceDeleteTarget;
+    const resource = isDirectoryNode(target) ? "directories" : "essays";
+    const encodedPath = target.path.map(encodeURIComponent).join("/");
+    workspaceDeleteBusy = true;
+    workspaceError = "";
+
+    try {
+      const res = await fetch(
+        `/api/v1/accounts/${encodeURIComponent(activeAccountId)}/workspace/${resource}/${encodedPath}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      workspaceDeleteTarget = null;
+      await loadWorkspace(activeAccountId);
+      status = `Deleted ${isDirectoryNode(target) ? "folder" : "essay"} ${target.name}`;
+      uiLog("info", "Workspace item deleted", { path: target.path, type: resource });
+    } catch (err) {
+      workspaceError = `Could not delete ${isDirectoryNode(target) ? "folder" : "essay"}: ${String(err)}`;
+      uiLog("error", "Failed to delete workspace item", { path: target.path, error: err });
+    } finally {
+      workspaceDeleteBusy = false;
     }
   }
 
@@ -494,17 +555,43 @@
     }
   }
 
-  function saveDraft() {
-    if (selectedWorkspaceEssay !== null) {
-      selectedWorkspaceEssay = {
-        ...selectedWorkspaceEssay,
-        markdown
-      };
-      status = `Draft saved locally for ${workspaceSelectionLabel}`;
+  async function saveDraft() {
+    if (!activeAccountId || selectedWorkspaceEssay === null) {
+      workspaceError = "Select a persisted essay before saving.";
       return;
     }
 
-    status = "Draft saved locally";
+    const essayPath = selectedWorkspaceEssay.path;
+    const encodedPath = essayPath.map((segment) => encodeURIComponent(segment)).join("/");
+    const body: SaveWorkspaceEssayRequest = { markdown };
+    savingDraft = true;
+    workspaceError = "";
+    uiLog("info", "Saving essay", { accountId: activeAccountId, essayPath });
+
+    try {
+      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(activeAccountId)}/workspace/essays/${encodedPath}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const saved: WorkspaceEssayContent = await res.json();
+      selectedWorkspaceEssay = saved;
+      markdown = saved.markdown;
+      status = `Draft saved for ${pathToLabel(saved.path)}`;
+      uiLog("info", "Essay saved", { accountId: activeAccountId, essayPath: saved.path });
+    } catch (err) {
+      workspaceError = `Could not save essay: ${String(err)}`;
+      uiLog("error", "Failed to save essay", err);
+    } finally {
+      savingDraft = false;
+    }
   }
 
   function handleModelChange(e: Event) {
@@ -541,23 +628,47 @@
   }
 
   function isDirectoryNode(node: WorkspaceNode) {
-    return node.nodeType.tag === "WorkspaceDirectoryNode";
+    return workspaceNodeTypeTag(node.nodeType) === "WorkspaceDirectoryNode";
   }
 
-  function isDirectoryNodeType(nodeType: WorkspaceNodeType) {
-    return nodeType.tag === "WorkspaceDirectoryNode";
+  function workspaceNodeTypeTag(nodeType: WorkspaceNodeType) {
+    return typeof nodeType === "string" ? nodeType : nodeType.tag;
   }
 
-  function flattenWorkspaceNodes(nodes: WorkspaceNode[], depth = 0): WorkspaceDisplayItem[] {
-    return nodes.flatMap((node) => [
-      {
-        name: node.name,
-        path: node.path,
-        depth,
-        nodeType: node.nodeType
-      },
-      ...(isDirectoryNode(node) ? flattenWorkspaceNodes(node.children, depth + 1) : [])
-    ]);
+  function directoryAncestors(path: string[]): string[][] {
+    return Array.from({ length: Math.max(0, path.length - 1) }, (_, index) => path.slice(0, index + 1));
+  }
+
+  function isWorkspaceDirectoryExpanded(path: string[]) {
+    return expandedWorkspaceDirectories.some((expandedPath) => samePath(expandedPath, path));
+  }
+
+  function expandWorkspaceDirectory(path: string[]) {
+    if (path.length > 0 && !isWorkspaceDirectoryExpanded(path)) {
+      expandedWorkspaceDirectories = [...expandedWorkspaceDirectories, path];
+    }
+  }
+
+  function updateWorkspaceDirectoryExpansion(path: string[], expanded: boolean) {
+    expandedWorkspaceDirectories = expanded
+      ? isWorkspaceDirectoryExpanded(path)
+        ? expandedWorkspaceDirectories
+        : [...expandedWorkspaceDirectories, path]
+      : expandedWorkspaceDirectories.filter((expandedPath) => !samePath(expandedPath, path));
+  }
+
+  function selectWorkspaceNode(node: WorkspaceNode) {
+    if (isDirectoryNode(node)) {
+      selectedWorkspaceDirectoryPath = node.path;
+      selectedWorkspaceEssay = null;
+    } else if (activeAccountId) {
+      void loadWorkspaceEssay(activeAccountId, node.path);
+    }
+  }
+
+  function selectWorkspaceRoot() {
+    selectedWorkspaceDirectoryPath = [];
+    selectedWorkspaceEssay = null;
   }
 
   function samePath(left: string[], right: string[]) {
@@ -737,20 +848,26 @@
 
   <div class="grid" style={`--panel-cols: ${panelColumns};`}>
     <sl-card class={`panel ${panelState.tree ? "" : "is-collapsed"}`}>
-      <div slot="header" class="panel-header">
+      <div slot="header" class={`panel-header tree-panel-header ${panelState.tree ? "" : "is-tree-collapsed"}`}>
         <div>
           <h2>{panelState.tree ? "Folder Tree" : "Tree"}</h2>
-          <sl-badge variant="neutral">Target: {workspaceSelectionLabel}</sl-badge>
         </div>
-        <div class="panel-header-controls">
+        <div class="tree-toolbar">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button size="small" variant="default" on:click={() => activeAccountId && void loadWorkspace(activeAccountId)}>
-            Reload Workspace
-          </sl-button>
+          <sl-icon-button
+            name="arrow-clockwise"
+            label="Reload workspace"
+            title="Reload workspace"
+            disabled={workspaceLoading}
+            on:click={() => activeAccountId && void loadWorkspace(activeAccountId)}
+          ></sl-icon-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button size="small" variant="default" on:click={() => togglePanel("tree")}>
-            {panelState.tree ? "Collapse" : "Expand"}
-          </sl-button>
+          <sl-icon-button
+            name={panelState.tree ? "chevron-bar-left" : "chevron-bar-right"}
+            label={panelState.tree ? "Collapse folder tree" : "Expand folder tree"}
+            title={panelState.tree ? "Collapse folder tree" : "Expand folder tree"}
+            on:click={() => togglePanel("tree")}
+          ></sl-icon-button>
         </div>
       </div>
 
@@ -760,60 +877,88 @@
             <sl-spinner></sl-spinner>
             <span>Loading workspace...</span>
           </div>
-        {:else if workspaceError}
-          <p class="login-error">{workspaceError}</p>
-        {:else if workspaceTree.length === 0}
-          <p class="footer-note">This workspace is empty. Create a folder or essay to begin.</p>
         {:else}
-          <div class="tree">
-            {#each flattenWorkspaceNodes(workspaceTree) as item}
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-button
-                variant={
-                  isDirectoryNodeType(item.nodeType)
-                    ? samePath(item.path, selectedWorkspaceDirectoryPath)
-                      ? "primary"
-                      : "default"
-                    : selectedWorkspaceEssay !== null && samePath(item.path, selectedWorkspaceEssay.path)
-                      ? "primary"
-                      : "default"
-                }
-                on:click={() =>
-                  isDirectoryNodeType(item.nodeType)
-                    ? (selectedWorkspaceDirectoryPath = item.path)
-                    : activeAccountId && void loadWorkspaceEssay(activeAccountId, item.path)
-                }
-                style={`margin-left: ${item.depth * 18}px;`}
-              >
-                {isDirectoryNodeType(item.nodeType) ? "📁" : "📝"} {item.name}
-              </sl-button>
-            {/each}
-          </div>
-
-          <div class="workspace-actions">
-            <sl-input
-              label="New Folder"
-              value={newWorkspaceDirectoryName}
-              on:sl-input={(e: Event) => (newWorkspaceDirectoryName = (e.target as { value?: string }).value ?? "")}
-            ></sl-input>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-button variant="primary" on:click={createWorkspaceDirectory}>Create Folder</sl-button>
-
-            <sl-input
-              label="New Essay"
-              value={newWorkspaceEssayName}
-              on:sl-input={(e: Event) => (newWorkspaceEssayName = (e.target as { value?: string }).value ?? "")}
-            ></sl-input>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-button variant="primary" on:click={createWorkspaceEssay}>Create Essay</sl-button>
-          </div>
-
-          <p class="footer-note">
-            New items are created under {pathToLabel(selectedWorkspaceDirectoryPath)}.
-          </p>
+          {#if workspaceError}
+            <p class="login-error">{workspaceError}</p>
+          {/if}
+          <WorkspaceTree
+            nodes={workspaceTree}
+            selectedPath={selectedWorkspaceEssay?.path ?? selectedWorkspaceDirectoryPath}
+            expandedPaths={expandedWorkspaceDirectories}
+            onSelect={selectWorkspaceNode}
+            onSelectRoot={selectWorkspaceRoot}
+            onExpansionChange={updateWorkspaceDirectoryExpansion}
+            onCreateDirectory={(path) => openWorkspaceCreate("folder", path)}
+            onCreateEssay={(path) => openWorkspaceCreate("essay", path)}
+            onDelete={openWorkspaceDelete}
+          />
+          {#if workspaceTree.length === 0}
+            <p class="footer-note">This workspace is empty. Use the actions beside Workspace to get started.</p>
+          {/if}
         {/if}
       {/if}
     </sl-card>
+
+    <sl-dialog
+      open={workspaceCreateKind !== null}
+      label={workspaceCreateKind === "folder" ? "Create folder" : "Create essay"}
+      on:sl-request-close={() => (workspaceCreateKind = null)}
+    >
+      <p class="create-dialog-location">In {pathToLabel(workspaceCreateParentPath)}</p>
+      <sl-input
+        label={workspaceCreateKind === "folder" ? "Folder name" : "Essay name"}
+        value={workspaceCreateName}
+        on:sl-input={(event: Event) => (workspaceCreateName = (event.target as { value?: string }).value ?? "")}
+      ></sl-input>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <sl-button slot="footer" variant="default" on:click={() => (workspaceCreateKind = null)} disabled={workspaceCreateBusy}>
+        Cancel
+      </sl-button>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <sl-button
+        slot="footer"
+        variant="primary"
+        on:click={submitWorkspaceCreate}
+        disabled={!workspaceCreateName.trim() || workspaceCreateBusy}
+        loading={workspaceCreateBusy}
+      >
+        Create {workspaceCreateKind === "folder" ? "Folder" : "Essay"}
+      </sl-button>
+    </sl-dialog>
+
+    <sl-dialog
+      open={workspaceDeleteTarget !== null}
+      label={`Delete ${workspaceDeleteTarget?.name ?? "workspace item"}`}
+      on:sl-request-close={() => (workspaceDeleteTarget = null)}
+    >
+      <p class="create-dialog-location">
+        Delete {workspaceDeleteTarget?.name}? This cannot be undone.
+      </p>
+      {#if workspaceDeleteTarget && isDirectoryNode(workspaceDeleteTarget)}
+        <p class="create-dialog-location">This also permanently deletes everything inside the folder.</p>
+      {/if}
+      {#if workspaceError}
+        <p class="login-error">{workspaceError}</p>
+      {/if}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <sl-button
+        slot="footer"
+        variant="default"
+        on:click={() => (workspaceDeleteTarget = null)}
+        disabled={workspaceDeleteBusy}
+      >
+        Cancel
+      </sl-button>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <sl-button
+        slot="footer"
+        variant="danger"
+        on:click={deleteWorkspaceItem}
+        loading={workspaceDeleteBusy}
+      >
+        Delete
+      </sl-button>
+    </sl-dialog>
 
     <sl-card class={`panel ${panelState.editor ? "" : "is-collapsed"}`}>
       <div slot="header" class="panel-header">
@@ -847,7 +992,9 @@
 
         <div class="editor-actions">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="primary" on:click={saveDraft}>Save Draft</sl-button>
+          <sl-button variant="primary" on:click={saveDraft} disabled={savingDraft || selectedWorkspaceEssay === null}>
+            {savingDraft ? "Saving..." : "Save Draft"}
+          </sl-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="default" on:click={mockGrade}>Grade (mock stream)</sl-button>
         </div>
