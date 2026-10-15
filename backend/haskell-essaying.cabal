@@ -22,6 +22,7 @@ executable haskell-essaying
     , Essaying.Server
     , Essaying.Storage
     , Essaying.Types.Account
+    , Essaying.Types.Context
     , Essaying.Types.Storage
     , Essaying.Types.Workspace
     , Essaying.Utils
@@ -58,6 +59,7 @@ test-suite haskell-essaying-test
     , Essaying.Server
     , Essaying.Storage
     , Essaying.Types.Account
+    , Essaying.Types.Context
     , Essaying.Types.Storage
     , Essaying.Types.Workspace
     , Essaying.Utils
