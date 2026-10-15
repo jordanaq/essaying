@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main where
 
@@ -8,10 +9,11 @@ import Control.Exception (finally)
 import Control.Monad (when)
 import Data.Aeson (decode, encode)
 import Data.List (sortOn)
+import Data.Map.Strict qualified as Map
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Essaying.API.V1 (Api)
-import Essaying.Context (Context (..))
+import Essaying.Context (applyLayer, emptyEffectiveContext)
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
 import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile, readAccountProfile)
 import Essaying.Persistence.Workspace
@@ -34,6 +36,14 @@ import Essaying.Persistence.Workspace
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountRequest (..), UpdateAccountRequest)
+import Essaying.Types.Context
+  ( EffectiveContext (..)
+  , ListOverride (..)
+  , RubricCriterion (..)
+  , RubricOverride (..)
+  , ScalarOverride (..)
+  )
+import Essaying.Types.Context qualified as ContextType (ContextLayer (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Essaying.Types.Workspace
   ( CreateWorkspaceDirectoryRequest
@@ -87,6 +97,8 @@ tests = TestList
   , TestLabel "health response json" healthResponseJson
   , TestLabel "ready response value" readyResponseValue
   , TestLabel "ready response json" readyResponseJson
+  , TestLabel "context layer merge rules" contextLayerMergeRules
+  , TestLabel "context layer JSON representation" contextLayerJson
   , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
   , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
   , TestLabel "health endpoint" healthEndpoint
@@ -243,11 +255,13 @@ healthResponseJson = TestCase $ do
 readyResponseValue :: Test
 readyResponseValue = TestCase $ do
   let sampleContext =
-        Context
+        EffectiveContext
           { title = Just "History Essay"
           , audience = Just "student"
           , model = Just "llama3.1:8b"
+          , tags = []
           , instructions = ["Use concise prose."]
+          , grading_directions = []
           , rubric = mempty
           }
       expected =
@@ -260,13 +274,73 @@ readyResponseValue = TestCase $ do
 readyResponseJson :: Test
 readyResponseJson = TestCase $ do
   let sampleContext =
-        mempty
+        emptyEffectiveContext
           { title = Just "Essay"
           , rubric = mempty
           }
       response = readyResponseFromContext sampleContext
       expected = Just response
   assertEqual "ready response JSON should round-trip" expected (decode (encode response))
+
+contextLayerMergeRules :: Test
+contextLayerMergeRules = TestCase $ do
+  let inherited =
+        emptyEffectiveContext
+          { audience = Just "student"
+          , tags = ["writing"]
+          , instructions = ["Be clear."]
+          , rubric =
+              Map.fromList
+                [ ("clarity", RubricCriterion 1 Nothing)
+                , ("evidence", RubricCriterion 1 Nothing)
+                ]
+          }
+      layer =
+        ContextType.ContextLayer
+          { ContextType.title = Just (SetScalar "Causes")
+          , ContextType.audience = Just ClearScalar
+          , ContextType.model = Nothing
+          , ContextType.tags = Just (AppendList ["history", "writing"])
+          , ContextType.instructions = Just (ReplaceList ["Use sources."])
+          , ContextType.grading_directions = Just (ReplaceList [])
+          , ContextType.rubric = Just (MergeRubric (Map.singleton "evidence" (RubricCriterion 2 Nothing)))
+          }
+      merged = applyLayer inherited layer
+  assertEqual "scalar set and clear" (Just "Causes", Nothing) (merged.title, merged.audience)
+  assertEqual "tags append and deduplicate" ["writing", "history"] merged.tags
+  assertEqual "instructions replace" ["Use sources."] merged.instructions
+  assertEqual "empty replacement clears directions" [] merged.grading_directions
+  assertEqual "rubric merge retains and overrides criteria"
+    (Map.fromList
+      [ ("clarity", RubricCriterion 1 Nothing)
+      , ("evidence", RubricCriterion 2 Nothing)
+      ])
+    merged.rubric
+  let cleared =
+        applyLayer merged
+          (layer
+            { ContextType.tags = Just (ReplaceList [])
+            , ContextType.rubric = Just (ReplaceRubric Map.empty)
+            })
+  assertEqual "replacement clears tags" [] cleared.tags
+  assertEqual "replacement clears rubric" Map.empty cleared.rubric
+
+contextLayerJson :: Test
+contextLayerJson = TestCase $ do
+  let source =
+        "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"student\"},\"model\":{\"tag\":\"ClearScalar\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"writing\"]},\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"clarity\":{\"weight\":1,\"description\":null}}}}"
+      expected =
+        ContextType.ContextLayer
+          { ContextType.title = Nothing
+          , ContextType.audience = Just (SetScalar "student")
+          , ContextType.model = Just ClearScalar
+          , ContextType.tags = Just (AppendList ["writing"])
+          , ContextType.instructions = Nothing
+          , ContextType.grading_directions = Nothing
+          , ContextType.rubric = Just (MergeRubric (Map.singleton "clarity" (RubricCriterion 1 Nothing)))
+          }
+  assertEqual "documented JSON decodes" (Just expected) (decode source)
+  assertEqual "layer JSON round-trips" (Just expected) (decode (encode expected))
 
 resolveCacheRootFallback :: Test
 resolveCacheRootFallback = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
@@ -315,7 +389,7 @@ readyEndpoint = TestCase $
       Left err -> assertFailure (show err)
       Right response -> do
         assertEqual "ready endpoint message" "System Ready" (message response)
-        assertEqual "ready endpoint sample context" mempty (sampleContext response)
+        assertEqual "ready endpoint sample context" emptyEffectiveContext (sampleContext response)
 
 listAccountsEndpointWithSampleCache :: Test
 listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cachePath -> do

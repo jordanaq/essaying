@@ -1,61 +1,75 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 
 module Essaying.Context
-  ( Context (..)
-  , RubricCriterion (..)
+  ( EffectiveContext (..)
+  , emptyEffectiveContext
+  , applyLayer
   , loadEffectiveContext
   )
 where
 
-import Control.Applicative ((<|>))
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
-import GHC.Generics (Generic)
+import Essaying.Types.Context
+  ( ContextLayer (..)
+  , EffectiveContext (..)
+  , ListOverride (..)
+  , RubricOverride (..)
+  , RubricCriterion
+  , ScalarOverride (..)
+  )
+import Essaying.Types.Storage (WorkspaceRoot)
 
--- The context schema can be authored at any folder level and inherited by children.
-data Context = Context
-  { title :: Maybe Text
-  , audience :: Maybe Text
-  , model :: Maybe Text
-  , instructions :: [Text]
-  , rubric :: Map Text RubricCriterion
-  }
-  deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+emptyEffectiveContext :: EffectiveContext
+emptyEffectiveContext =
+  EffectiveContext
+    { title = Nothing
+    , audience = Nothing
+    , model = Nothing
+    , tags = []
+    , instructions = []
+    , grading_directions = []
+    , rubric = Map.empty
+    }
 
-data RubricCriterion = RubricCriterion
-  { weight :: Double
-  , description :: Maybe Text
-  }
-  deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+applyLayer :: EffectiveContext -> ContextLayer -> EffectiveContext
+applyLayer parent layer =
+  EffectiveContext
+    { title = applyScalar parent.title layer.title
+    , audience = applyScalar parent.audience layer.audience
+    , model = applyScalar parent.model layer.model
+    , tags = deduplicateTags (applyList parent.tags layer.tags)
+    , instructions = applyList parent.instructions layer.instructions
+    , grading_directions = applyList parent.grading_directions layer.grading_directions
+    , rubric = applyRubric parent.rubric layer.rubric
+    }
 
-instance Semigroup Context where
-  -- Right side overrides scalar fields; lists/maps are merged.
-  newer <> older =
-    Context
-      { title = title newer <|> title older
-      , audience = audience newer <|> audience older
-      , model = model newer <|> model older
-      , instructions = instructions older <> instructions newer
-      , rubric = rubric older <> rubric newer
-      }
+applyScalar :: Maybe a -> Maybe (ScalarOverride a) -> Maybe a
+applyScalar inherited Nothing = inherited
+applyScalar _ (Just (SetScalar value)) = Just value
+applyScalar _ (Just ClearScalar) = Nothing
 
-instance Monoid Context where
-  mempty =
-    Context
-      { title = Nothing
-      , audience = Nothing
-      , model = Nothing
-      , instructions = []
-      , rubric = Map.empty
-      }
+applyList :: [a] -> Maybe (ListOverride a) -> [a]
+applyList inherited Nothing = inherited
+applyList inherited (Just (AppendList items)) = inherited <> items
+applyList _ (Just (ReplaceList items)) = items
 
-loadEffectiveContext :: FilePath -> FilePath -> IO Context
+applyRubric :: Map.Map Text RubricCriterion -> Maybe RubricOverride -> Map.Map Text RubricCriterion
+applyRubric inherited Nothing = inherited
+applyRubric inherited (Just (MergeRubric criteria)) = Map.union criteria inherited
+applyRubric _ (Just (ReplaceRubric criteria)) = criteria
+
+deduplicateTags :: Ord a => [a] -> [a]
+deduplicateTags = go Set.empty
+  where
+    go _ [] = []
+    go seen (item : rest)
+      | Set.member item seen = go seen rest
+      | otherwise = item : go (Set.insert item seen) rest
+
+loadEffectiveContext :: WorkspaceRoot -> FilePath -> IO EffectiveContext
 loadEffectiveContext _currentPath _rootPath =
-  -- Temporary stub: real context.yaml inheritance/parsing will be implemented later.
-  pure mempty
+  -- Temporary stub: context.json inheritance/parsing will be implemented later.
+  pure emptyEffectiveContext
