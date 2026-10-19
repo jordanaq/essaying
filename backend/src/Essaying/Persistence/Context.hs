@@ -2,8 +2,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Persistence.Context
-  ( ContextLayerError (..)
+  ( -- * Result types
+    ContextLayerError (..)
   , EffectiveContextError (..)
+    -- * Context loading
   , loadContextLayer
   , loadEffectiveContext
   )
@@ -23,6 +25,9 @@ import System.Directory (doesFileExist, pathIsSymbolicLink)
 import System.FilePath ((</>), isAbsolute, makeRelative)
 import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
 
+-- | Reason a single context file could not be loaded.
+-- Filesystem errors use workspace-relative paths; invalid-path errors retain
+-- the supplied path.
 data ContextLayerError
   = ContextLayerInvalidPath FilePath
   | ContextLayerSymbolicLink FilePath
@@ -30,6 +35,8 @@ data ContextLayerError
   | ContextLayerJsonError FilePath String
   deriving stock (Eq, Show)
 
+-- | Reason context could not be resolved for an essay.
+-- Errors from an ancestor @context.json@ retain their 'ContextLayerError'.
 data EffectiveContextError
   = EffectiveContextInvalidPath FilePath
   | EffectiveContextEssayNotFound FilePath
@@ -44,7 +51,10 @@ data EffectiveContextError
 debug :: Int -> String -> IO ()
 debug = debug_ "[Context]"
 
--- | Resolve the context files from the workspace root to the essay's directory.
+-- | Load and apply @context.json@ files from the workspace root through the
+-- essay's parent directory, in that order. The essay path must be a safe,
+-- workspace-relative @.md@ path to an existing file. Missing context files
+-- are skipped; invalid or unreadable ones return an error.
 loadEffectiveContext :: WorkspaceRoot -> FilePath -> IO (Either EffectiveContextError EffectiveContext)
 loadEffectiveContext workspaceRoot essayPath = do
   validated <- validateEssayPath workspaceRoot essayPath
@@ -67,8 +77,9 @@ loadEffectiveContext workspaceRoot essayPath = do
         Right Nothing -> pure (Right ctx)
         Right (Just layer) -> pure (Right (applyLayer ctx layer))
 
--- | Validate an essay path and return its safe, workspace-relative segments.
--- Context discovery can reuse these segments without parsing the path again.
+-- | Validate an existing essay path and return its workspace-relative
+-- segments. Reject unsafe paths, non-@.md@ targets, and symbolic links.
+-- Context discovery reuses the segments to find ancestor directories.
 validateEssayPath :: WorkspaceRoot -> FilePath -> IO (Either EffectiveContextError [FilePath])
 validateEssayPath workspaceRoot@(WorkspaceRoot root) essayPath =
   case relativeSegments essayPath of
@@ -91,14 +102,16 @@ validateEssayPath workspaceRoot@(WorkspaceRoot root) essayPath =
                     Right False -> Left (EffectiveContextEssayNotFound essayPath)
                     Right True -> Right segments
 
+-- | Translate a path-check error into the corresponding essay-path error.
 essayPathError :: FilePath -> ContextLayerError -> EffectiveContextError
 essayPathError essayPath (ContextLayerInvalidPath _) = EffectiveContextEssayNotFound essayPath
 essayPathError _ (ContextLayerSymbolicLink path) = EffectiveContextSymbolicLink path
 essayPathError _ (ContextLayerIoError path message) = EffectiveContextIoError path message
 essayPathError _ (ContextLayerJsonError path message) = EffectiveContextJsonError path message
 
--- | Load one workspace-relative context.json file. Only a missing file is
--- optional; invalid paths, links, I/O failures, and invalid JSON are errors.
+-- | Load one workspace-relative @context.json@ file. Return 'Right' 'Nothing'
+-- when the file itself is absent. Unsafe paths, missing parent directories,
+-- symbolic links, I/O failures, and invalid JSON are errors.
 loadContextLayer :: WorkspaceRoot -> FilePath -> IO (Either ContextLayerError (Maybe ContextLayer))
 loadContextLayer (WorkspaceRoot root) relativePath =
   case contextSegments relativePath of
@@ -120,11 +133,15 @@ loadContextLayer (WorkspaceRoot root) relativePath =
                   debug 3 $ "Loaded context file=" <> show relativePath
                   pure (Right (Just layer))
 
+-- | Accept a safe relative path ending in @context.json@ and split it into
+-- segments. Return 'Nothing' for any other path.
 contextSegments :: FilePath -> Maybe [FilePath]
 contextSegments path = do
   segments <- relativeSegments path
   if last segments == "context.json" then Just segments else Nothing
 
+-- | Split a forward-slash-separated workspace path into safe, nonempty
+-- segments. Reject absolute paths and unsafe segments.
 relativeSegments :: FilePath -> Maybe [FilePath]
 relativeSegments path
   | isAbsolute path = Nothing
@@ -134,6 +151,9 @@ relativeSegments path
             then Just segments
             else Nothing
 
+-- | Check each path from the workspace root through the target for symbolic
+-- links. Return 'False' only when the final entry is absent; a missing
+-- intermediate entry or a symbolic link is an error.
 checkEntries :: FilePath -> [FilePath] -> IO (Either ContextLayerError Bool)
 checkEntries _ [] = pure (Right True)
 checkEntries root (fullPath : remaining) = do
