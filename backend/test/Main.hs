@@ -16,6 +16,12 @@ import Essaying.API.V1 (Api)
 import Essaying.Context (applyLayer, emptyEffectiveContext)
 import Essaying.Handler.Health (HealthResponse (..), ReadyResponse (..), healthResponse, readyResponseFromContext)
 import Essaying.Persistence.Account (CreateAccountProfileResult (..), createAccountProfile, readAccountProfile)
+import Essaying.Persistence.Context
+  ( ContextLayerError (..)
+  , EffectiveContextError (..)
+  , loadContextLayer
+  , loadEffectiveContext
+  )
 import Essaying.Persistence.Workspace
   ( CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayResult (..)
@@ -65,7 +71,7 @@ import Servant.Client
   , runClientM
   )
 import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
-import System.Directory (createDirectoryIfMissing, createFileLink, doesDirectoryExist, getCurrentDirectory, removeFile, removePathForcibly)
+import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, doesDirectoryExist, getCurrentDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.Exit (exitFailure)
 import System.FilePath ((</>), normalise, takeDirectory)
@@ -99,6 +105,9 @@ tests = TestList
   , TestLabel "ready response json" readyResponseJson
   , TestLabel "context layer merge rules" contextLayerMergeRules
   , TestLabel "context layer JSON representation" contextLayerJson
+  , TestLabel "load one context layer" loadOneContextLayer
+  , TestLabel "validate essay path for context" validateEssayPathForContext
+  , TestLabel "resolve inherited context files" resolveInheritedContextFiles
   , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
   , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
   , TestLabel "health endpoint" healthEndpoint
@@ -341,6 +350,123 @@ contextLayerJson = TestCase $ do
           }
   assertEqual "documented JSON decodes" (Just expected) (decode source)
   assertEqual "layer JSON round-trips" (Just expected) (decode (encode expected))
+
+loadOneContextLayer :: Test
+loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let rootPath = cachePath </> "workspace"
+      workspace = WorkspaceRoot rootPath
+      relativePath = "History/context.json"
+      contextPath = rootPath </> relativePath
+  createDirectoryIfMissing True (takeDirectory contextPath)
+  missing <- loadContextLayer workspace relativePath
+  assertEqual "missing context file contributes nothing" (Right Nothing) missing
+
+  writeFile contextPath "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"student\"}}"
+  loaded <- loadContextLayer workspace relativePath
+  let expected =
+        ContextType.ContextLayer
+          { ContextType.title = Nothing
+          , ContextType.audience = Just (SetScalar "student")
+          , ContextType.model = Nothing
+          , ContextType.tags = Nothing
+          , ContextType.instructions = Nothing
+          , ContextType.grading_directions = Nothing
+          , ContextType.rubric = Nothing
+          }
+  assertEqual "valid context file decodes" (Right (Just expected)) loaded
+
+  writeFile contextPath "{invalid"
+  invalid <- loadContextLayer workspace relativePath
+  case invalid of
+    Left (ContextLayerJsonError _ _) -> pure ()
+    other -> assertFailure ("expected JSON error, got " <> show other)
+
+  escaped <- loadContextLayer workspace "../context.json"
+  assertEqual "workspace escape is rejected"
+    (Left (ContextLayerInvalidPath "../context.json")) escaped
+
+  removeFile contextPath
+  let linkedPath = cachePath </> "linked-context.json"
+  writeFile linkedPath "{}"
+  createFileLink linkedPath contextPath
+  linked <- loadContextLayer workspace relativePath
+  assertEqual "context symlink is rejected"
+    (Left (ContextLayerSymbolicLink relativePath)) linked
+
+validateEssayPathForContext :: Test
+validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let rootPath = cachePath </> "workspace"
+      workspace = WorkspaceRoot rootPath
+      essayPath = "History/causes.md"
+      fullEssayPath = rootPath </> essayPath
+  createDirectoryIfMissing True (takeDirectory fullEssayPath)
+
+  missing <- loadEffectiveContext workspace essayPath
+  assertEqual "missing essay is an error"
+    (Left (EffectiveContextEssayNotFound essayPath)) missing
+  assertEqual "missing ancestor is an error"
+    (Left (EffectiveContextEssayNotFound "Missing/causes.md"))
+    =<< loadEffectiveContext workspace "Missing/causes.md"
+  assertEqual "path traversal is rejected"
+    (Left (EffectiveContextInvalidPath "../causes.md"))
+    =<< loadEffectiveContext workspace "../causes.md"
+  assertEqual "non-essay extension is rejected"
+    (Left (EffectiveContextInvalidPath "History/causes.txt"))
+    =<< loadEffectiveContext workspace "History/causes.txt"
+
+  writeFile fullEssayPath "# Causes\n"
+  valid <- loadEffectiveContext workspace essayPath
+  assertEqual "existing essay path is accepted" (Right emptyEffectiveContext) valid
+
+  removeFile fullEssayPath
+  let outsidePath = cachePath </> "outside.md"
+  writeFile outsidePath "# Outside\n"
+  createFileLink outsidePath fullEssayPath
+  linked <- loadEffectiveContext workspace essayPath
+  assertEqual "essay symlink is rejected"
+    (Left (EffectiveContextSymbolicLink essayPath)) linked
+
+  let outsideDirectory = cachePath </> "outside-folder"
+  createDirectoryIfMissing True outsideDirectory
+  writeFile (outsideDirectory </> "causes.md") "# Linked directory\n"
+  createDirectoryLink outsideDirectory (rootPath </> "Linked")
+  linkedDirectory <- loadEffectiveContext workspace "Linked/causes.md"
+  assertEqual "ancestor directory symlink is rejected"
+    (Left (EffectiveContextSymbolicLink "Linked")) linkedDirectory
+
+resolveInheritedContextFiles :: Test
+resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let rootPath = cachePath </> "workspace"
+      workspace = WorkspaceRoot rootPath
+      essayPath = "History/French-Revolution/causes.md"
+      historyPath = rootPath </> "History"
+      essayDirectory = historyPath </> "French-Revolution"
+  createDirectoryIfMissing True essayDirectory
+  writeFile (essayDirectory </> "causes.md") "# Causes\n"
+  writeFile (rootPath </> "context.json")
+    "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"student\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"writing\"]}}"
+  writeFile (historyPath </> "context.json")
+    "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"advanced\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"history\"]}}"
+
+  inherited <- loadEffectiveContext workspace essayPath
+  let expected =
+        emptyEffectiveContext
+          { audience = Just "advanced"
+          , tags = ["writing", "history"]
+          }
+  assertEqual "root and parent contexts resolve in order" (Right expected) inherited
+
+  writeFile (essayDirectory </> "context.json")
+    "{\"tags\":{\"tag\":\"ReplaceList\",\"contents\":[\"causes\"]}}"
+  replaced <- loadEffectiveContext workspace essayPath
+  assertEqual "nearest directory can replace inherited tags"
+    (Right (expected {tags = ["causes"]})) replaced
+
+  writeFile (rootPath </> "context.json") "{invalid"
+  invalidAncestor <- loadEffectiveContext workspace essayPath
+  case invalidAncestor of
+    Left (EffectiveContextLayerError (ContextLayerJsonError "context.json" _)) -> pure ()
+    other -> assertFailure ("expected invalid ancestor error, got " <> show other)
 
 resolveCacheRootFallback :: Test
 resolveCacheRootFallback = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
