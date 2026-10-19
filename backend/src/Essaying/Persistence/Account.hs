@@ -61,6 +61,7 @@ createAccountProfile accountRoot@(AccountRoot accountRootPath) profile = do
       | otherwise -> ioError ioErr
     Right () -> do
       saveAccountProfile accountRoot profile
+      debug 1 $ "Created account root=" <> show accountRootPath
       pure AccountCreated
 
 deleteAccountProfile :: AccountRoot -> IO Bool
@@ -69,6 +70,7 @@ deleteAccountProfile (AccountRoot accountRootPath) = do
   if dirExists
     then do
       removePathForcibly accountRootPath
+      debug 1 $ "Deleted account root=" <> show accountRootPath
       pure True
     else pure False
 

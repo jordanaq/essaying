@@ -9,7 +9,7 @@ import Data.Text (Text)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
 import Essaying.Handler.Workspace (workspaceHandler)
-import Essaying.Utils (isValidAccountName, slugifyText)
+import Essaying.Utils (debug_, isValidAccountName, slugifyText)
 import Essaying.Persistence.Account
   ( CreateAccountProfileResult (..)
   , createAccountProfile
@@ -125,6 +125,7 @@ updateAccountProfileHandler accountIdText req = do
       updated = AccountProfile (AccountId accountIdText) nextDisplayName nextPreferredModel
 
   liftIO $ saveAccountProfile acctRoot updated
+  liftIO $ debug_ "[Account]" 2 $ "Updated profile account=" <> show accountIdText
   pure updated
 
 makeAccountId :: Text -> AccountId

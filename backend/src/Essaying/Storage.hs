@@ -39,7 +39,7 @@ resolveCacheRoot = do
 
   let normalized = normalise absPath
 
-  debug 1 $ "Resolved cache root: " <> normalized
+  debug 3 $ "Resolved cache root: " <> normalized
 
   createDirectoryIfMissing True normalized
 
