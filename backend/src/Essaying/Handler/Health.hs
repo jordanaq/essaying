@@ -13,12 +13,10 @@ module Essaying.Handler.Health
   )
 where
 
-import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
-import Essaying.Context (loadEffectiveContext)
+import Essaying.Context (emptyEffectiveContext)
 import Essaying.Types.Context (EffectiveContext)
-import Essaying.Types.Storage (WorkspaceRoot (..))
 import GHC.Generics (Generic)
 import Servant (Handler)
 
@@ -53,10 +51,6 @@ readyResponseFromContext sampleContext =
     }
 
 readyHandler :: Handler ReadyResponse
-readyHandler = do
-  effective <-
-    liftIO $
-      loadEffectiveContext
-        (WorkspaceRoot "data/sample")
-        "History/French-Revolution"
-  pure (readyResponseFromContext effective)
+readyHandler =
+  -- Readiness should remain available while a user's context is invalid.
+  pure (readyResponseFromContext emptyEffectiveContext)

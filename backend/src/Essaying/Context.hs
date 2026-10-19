@@ -5,7 +5,6 @@ module Essaying.Context
   ( EffectiveContext (..)
   , emptyEffectiveContext
   , applyLayer
-  , loadEffectiveContext
   )
 where
 
@@ -20,7 +19,6 @@ import Essaying.Types.Context
   , RubricCriterion
   , ScalarOverride (..)
   )
-import Essaying.Types.Storage (WorkspaceRoot)
 
 emptyEffectiveContext :: EffectiveContext
 emptyEffectiveContext =
@@ -68,8 +66,3 @@ deduplicateTags = go Set.empty
     go seen (item : rest)
       | Set.member item seen = go seen rest
       | otherwise = item : go (Set.insert item seen) rest
-
-loadEffectiveContext :: WorkspaceRoot -> FilePath -> IO EffectiveContext
-loadEffectiveContext _currentPath _rootPath =
-  -- Temporary stub: context.json inheritance/parsing will be implemented later.
-  pure emptyEffectiveContext
