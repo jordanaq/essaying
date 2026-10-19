@@ -18,6 +18,7 @@ import Essaying.Context (emptyEffectiveContext, applyLayer)
 import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePath)
 import Essaying.Types.Context (ContextLayer, EffectiveContext)
 import Essaying.Types.Storage (WorkspaceRoot (..))
+import Essaying.Utils (debug_)
 import System.Directory (doesFileExist, pathIsSymbolicLink)
 import System.FilePath ((</>), isAbsolute, makeRelative)
 import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
@@ -38,6 +39,10 @@ data EffectiveContextError
   | EffectiveContextLayerError ContextLayerError
   deriving stock (Eq, Show)
 
+
+-- | Emit context filesystem messages when @HESSAY_DEBUG@ is at least 3.
+debug :: Int -> String -> IO ()
+debug = debug_ "[Context]"
 
 -- | Resolve the context files from the workspace root to the essay's directory.
 loadEffectiveContext :: WorkspaceRoot -> FilePath -> IO (Either EffectiveContextError EffectiveContext)
@@ -106,12 +111,14 @@ loadContextLayer (WorkspaceRoot root) relativePath =
         Right False -> pure (Right Nothing)
         Right True -> do
           contents <- try (BS.readFile (last paths)) :: IO (Either IOException BS.ByteString)
-          pure $ case contents of
-            Left err -> Left (ContextLayerIoError relativePath (ioeGetErrorString err))
+          case contents of
+            Left err -> pure (Left (ContextLayerIoError relativePath (ioeGetErrorString err)))
             Right bytes ->
               case eitherDecodeStrict' bytes of
-                Left message -> Left (ContextLayerJsonError relativePath message)
-                Right layer -> Right (Just layer)
+                Left message -> pure (Left (ContextLayerJsonError relativePath message))
+                Right layer -> do
+                  debug 3 $ "Loaded context file=" <> show relativePath
+                  pure (Right (Just layer))
 
 contextSegments :: FilePath -> Maybe [FilePath]
 contextSegments path = do
