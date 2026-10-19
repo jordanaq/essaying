@@ -23,7 +23,9 @@ trimStr = f . f
 debug_ :: String -> Int -> String -> IO ()
 debug_ pre level out = do
   dbg <- lookupEnv "HESSAY_DEBUG"
-  when (dbg == Just (show level)) $ putStrLn (pre <> " " <> out)
+  case dbg of
+    Just val -> when (read val >= level) $ putStrLn (pre <> " " <> out)
+    Nothing -> return ()
 
 toSlugChar :: Char -> Char
 toSlugChar c
