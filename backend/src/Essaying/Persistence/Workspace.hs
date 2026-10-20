@@ -1,13 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Persistence.Workspace
-  ( -- * Result types
-    CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayResult (..)
-  , WorkspaceDeleteError (..)
-  , WorkspaceDeleteResult (..)
-    -- * Workspace operations
-  , listWorkspaceTree
+  ( -- * Workspace operations
+    listWorkspaceTree
   , loadWorkspaceEssay
   , createWorkspaceDirectory
   , createWorkspaceEssay
@@ -26,7 +21,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as TextIO
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( WorkspaceEssayContent (..)
+  ( CreateWorkspaceDirectoryResult (..)
+  , CreateWorkspaceEssayResult (..)
+  , WorkspaceDeleteError (..)
+  , WorkspaceDeleteResult (..)
+  , WorkspaceEssayContent (..)
   , WorkspaceNode (..)
   , WorkspaceNodeType (..)
   )
@@ -41,36 +40,6 @@ import System.FilePath ((</>), dropExtension)
 -- Workspace filesystem details use level 3.
 debug :: Int -> String -> IO ()
 debug = debug_ "[Workspace]"
-
-
--- | Result of attempting to create a directory in the workspace.
-data CreateWorkspaceDirectoryResult
-  = WorkspaceDirectoryCreated WorkspaceNode
-  | WorkspaceDirectoryAlreadyExists
-  | WorkspaceDirectoryCreationFailed Text
-  deriving (Eq, Show)
-
--- | Result of attempting to create an essay in the workspace.
-data CreateWorkspaceEssayResult
-  = WorkspaceEssayCreated WorkspaceEssayContent
-  | WorkspaceEssayAlreadyExists
-  | WorkspaceEssayCreationFailed Text
-  deriving (Eq, Show)
-
--- | Reason a workspace deletion was refused before removing anything.
-data WorkspaceDeleteError
-  = WorkspaceDeleteInvalidPath [Text]
-  | WorkspaceDeleteRootDenied
-  | WorkspaceDeleteTargetNotFound [Text]
-  | WorkspaceDeleteWrongTargetType [Text]
-  | WorkspaceDeleteSymbolicLink [Text]
-  deriving (Eq, Show)
-
--- | Outcome of deleting a workspace essay or directory.
-data WorkspaceDeleteResult
-  = WorkspaceDeleteSucceeded
-  | WorkspaceDeleteFailed WorkspaceDeleteError
-  deriving (Eq, Show)
 
 
 -- | Append the @.md@ extension to an essay title for storage on disk.

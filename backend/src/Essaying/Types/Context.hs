@@ -13,6 +13,9 @@ module Essaying.Types.Context
   , ListOverride (..)
   , RubricOverride (..)
   , RubricCriterion (..)
+    -- * Loading errors
+  , ContextLayerError (..)
+  , EffectiveContextError (..)
   )
 where
 
@@ -93,6 +96,27 @@ data RubricCriterion = RubricCriterion
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
+
+-- | Reason a single context file could not be loaded.
+-- Filesystem errors use workspace-relative paths; invalid-path errors retain
+-- the supplied path.
+data ContextLayerError
+  = ContextLayerInvalidPath FilePath
+  | ContextLayerSymbolicLink FilePath
+  | ContextLayerIoError FilePath String
+  | ContextLayerJsonError FilePath String
+  deriving stock (Eq, Show)
+
+-- | Reason context could not be resolved for an essay.
+-- Errors from an ancestor @context.json@ retain their 'ContextLayerError'.
+data EffectiveContextError
+  = EffectiveContextInvalidPath FilePath
+  | EffectiveContextEssayNotFound FilePath
+  | EffectiveContextSymbolicLink FilePath
+  | EffectiveContextIoError FilePath String
+  | EffectiveContextJsonError FilePath String
+  | EffectiveContextLayerError ContextLayerError
+  deriving stock (Eq, Show)
 
 instance FromJSON a => FromJSON (ScalarOverride a) where
   parseJSON value = do

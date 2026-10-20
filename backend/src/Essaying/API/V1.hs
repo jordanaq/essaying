@@ -7,7 +7,7 @@ module Essaying.API.V1 (
 where
 
 import Data.Text (Text)
-import Essaying.Handler.Health (HealthResponse, ReadyResponse)
+import Essaying.Types.Health (HealthResponse, ReadyResponse)
 import Essaying.Types.Account (AccountProfile, CreateAccountRequest, UpdateAccountRequest)
 import Essaying.Types.Workspace (
     CreateWorkspaceDirectoryRequest,

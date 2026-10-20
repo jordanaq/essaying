@@ -1,6 +1,5 @@
 module Essaying.Persistence.Account
-  ( CreateAccountProfileResult (..)
-  , createAccountProfile
+  ( createAccountProfile
   , deleteAccountProfile
   , saveAccountProfile
   , readAccountProfile
@@ -12,7 +11,7 @@ import Control.Exception (IOException, try)
 import Data.Aeson (decodeFileStrict', encode)
 import Data.List (sort)
 import Essaying.Storage (profileRoot, workspaceRoot)
-import Essaying.Types.Account (AccountProfile, AccountId (..), AccountProfile (..))
+import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..))
 import Essaying.Types.Storage (AccountRoot (..), UsersRoot (..), WorkspaceRoot (..), unAccountRoot)
 import Essaying.Utils (isValidAccountName, debug_)
 import Data.Text (Text)
@@ -25,11 +24,6 @@ import qualified Data.ByteString.Lazy as BL
 
 debug :: Int -> String -> IO ()
 debug = debug_ "[Account]"
-
-data CreateAccountProfileResult
-  = AccountCreated
-  | AccountAlreadyExists
-  deriving (Eq, Show)
 
 expectedAccountIdText :: AccountRoot -> Text
 expectedAccountIdText accountRoot = Text.pack (takeFileName (unAccountRoot accountRoot))

@@ -11,8 +11,7 @@ import Data.Maybe (fromMaybe)
 import Essaying.Handler.Workspace (workspaceHandler)
 import Essaying.Utils (debug_, isValidAccountName, slugifyText)
 import Essaying.Persistence.Account
-  ( CreateAccountProfileResult (..)
-  , createAccountProfile
+  ( createAccountProfile
   , deleteAccountProfile
   , getAccountNames
   , readAccountProfile
@@ -22,6 +21,7 @@ import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot)
 import Essaying.Types.Account
   ( AccountId (..)
   , AccountProfile (..)
+  , CreateAccountProfileResult (..)
   , CreateAccountRequest (..)
   , UpdateAccountRequest (..)
   )

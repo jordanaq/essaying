@@ -1,12 +1,7 @@
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Persistence.Context
-  ( -- * Result types
-    ContextLayerError (..)
-  , EffectiveContextError (..)
-    -- * Context loading
-  , loadContextLayer
+  ( loadContextLayer
   , loadEffectiveContext
   )
 where
@@ -19,34 +14,12 @@ import Data.ByteString qualified as BS
 import Data.Text qualified as Text
 import Essaying.Context (emptyEffectiveContext, applyLayer)
 import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePath)
-import Essaying.Types.Context (ContextLayer, EffectiveContext)
+import Essaying.Types.Context (ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Utils (debug_)
 import System.Directory (doesFileExist, pathIsSymbolicLink)
 import System.FilePath ((</>), isAbsolute, makeRelative)
 import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
-
--- | Reason a single context file could not be loaded.
--- Filesystem errors use workspace-relative paths; invalid-path errors retain
--- the supplied path.
-data ContextLayerError
-  = ContextLayerInvalidPath FilePath
-  | ContextLayerSymbolicLink FilePath
-  | ContextLayerIoError FilePath String
-  | ContextLayerJsonError FilePath String
-  deriving stock (Eq, Show)
-
--- | Reason context could not be resolved for an essay.
--- Errors from an ancestor @context.json@ retain their 'ContextLayerError'.
-data EffectiveContextError
-  = EffectiveContextInvalidPath FilePath
-  | EffectiveContextEssayNotFound FilePath
-  | EffectiveContextSymbolicLink FilePath
-  | EffectiveContextIoError FilePath String
-  | EffectiveContextJsonError FilePath String
-  | EffectiveContextLayerError ContextLayerError
-  deriving stock (Eq, Show)
-
 
 -- | Emit context filesystem messages when @HESSAY_DEBUG@ is at least 3.
 debug :: Int -> String -> IO ()

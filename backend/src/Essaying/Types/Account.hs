@@ -8,6 +8,7 @@ module Essaying.Types.Account
   , AccountProfile (..)
   , CreateAccountRequest (..)
   , UpdateAccountRequest (..)
+  , CreateAccountProfileResult (..)
   )
 where
 
@@ -42,3 +43,9 @@ data UpdateAccountRequest = UpdateAccountRequest
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
+
+-- | Outcome of claiming a new account directory.
+data CreateAccountProfileResult
+  = AccountCreated
+  | AccountAlreadyExists
+  deriving stock (Eq, Show)

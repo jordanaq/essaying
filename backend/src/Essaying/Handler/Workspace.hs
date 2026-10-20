@@ -8,11 +8,7 @@ where
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import Essaying.Persistence.Workspace
-  ( CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayResult (..)
-  , WorkspaceDeleteError (..)
-  , WorkspaceDeleteResult (..)
-  , createWorkspaceDirectory
+  ( createWorkspaceDirectory
   , createWorkspaceEssay
   , deleteWorkspaceDirectory
   , deleteWorkspaceEssay
@@ -24,11 +20,15 @@ import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot, workspaceRoot
 import Essaying.Types.Account (AccountId (..))
 import Essaying.Types.Workspace
   ( CreateWorkspaceDirectoryRequest (..)
+  , CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayRequest (..)
+  , CreateWorkspaceEssayResult (..)
   , WorkspaceEssayContent (..)
   , WorkspaceNode (..)
   , WorkspaceTreeResponse (..)
   , SaveWorkspaceEssayRequest (..)
+  , WorkspaceDeleteError (..)
+  , WorkspaceDeleteResult (..)
   )
 import Essaying.Types.Storage (WorkspaceRoot)
 import Servant (Handler, NoContent (NoContent), err400, err403, err404, err409, throwError, (:<|>) (..))
