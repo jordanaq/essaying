@@ -64,7 +64,11 @@ loadEffectiveContext workspaceRoot essayPath = do
     Right essaySegments -> do
       let contextDirs = scanl (</>) "" (init essaySegments)
           contextPaths = map (</> "context.json") contextDirs
-      foldM foldContextH (Right emptyEffectiveContext) contextPaths
+      resolved <- foldM foldContextH (Right emptyEffectiveContext) contextPaths
+      case resolved of
+        Right _ -> debug 3 $ "Resolved context for essay=" <> show essayPath
+        Left _ -> pure ()
+      pure resolved
   where
     foldContextH
       :: Either EffectiveContextError EffectiveContext
@@ -112,7 +116,7 @@ essayPathError _ (ContextLayerJsonError path message) = EffectiveContextJsonErro
 
 -- | Load one workspace-relative @context.json@ file. Return 'Right' 'Nothing'
 -- when the file itself is absent. Unsafe paths, missing parent directories,
--- symbolic links, I/O failures, and invalid JSON are errors.
+-- symbolic links, I/O failures, duplicate JSON keys, and invalid JSON are errors.
 loadContextLayer :: WorkspaceRoot -> FilePath -> IO (Either ContextLayerError (Maybe ContextLayer))
 loadContextLayer (WorkspaceRoot root) relativePath =
   case contextSegments relativePath of
@@ -129,7 +133,9 @@ loadContextLayer (WorkspaceRoot root) relativePath =
             Left err -> pure (Left (ContextLayerIoError relativePath (ioeGetErrorString err)))
             Right bytes ->
               case eitherDecodeStrictWith jsonNoDup' ifromJSON bytes of
-                Left (_, message) -> pure (Left (ContextLayerJsonError relativePath message))
+                Left (_, message) -> do
+                  debug 3 $ "Invalid context file=" <> show relativePath <> ": " <> message
+                  pure (Left (ContextLayerJsonError relativePath message))
                 Right layer -> do
                   debug 3 $ "Loaded context file=" <> show relativePath
                   pure (Right (Just layer))

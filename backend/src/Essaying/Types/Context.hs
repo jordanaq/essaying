@@ -5,8 +5,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Types.Context
-  ( EffectiveContext (..)
+  ( -- * Resolved and source context
+    EffectiveContext (..)
   , ContextLayer (..)
+    -- * Layer operations
   , ScalarOverride (..)
   , ListOverride (..)
   , RubricOverride (..)
@@ -32,6 +34,8 @@ import Data.Map.Strict (Map)
 import Data.Set qualified as Set
 
 
+-- | Context available to an essay after all ancestor layers have been applied.
+-- Unset scalars are 'Nothing'; collections contain their resolved values.
 data EffectiveContext = EffectiveContext
   { title :: Maybe Text
   , audience :: Maybe Text
@@ -44,6 +48,8 @@ data EffectiveContext = EffectiveContext
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+-- | One directory's optional context settings. An omitted or @null@ field
+-- inherits its parent's value; supplied fields carry explicit operations.
 data ContextLayer = ContextLayer
   { title :: Maybe (ScalarOverride Text)
   , audience :: Maybe (ScalarOverride Text)
@@ -56,24 +62,31 @@ data ContextLayer = ContextLayer
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+-- | Set a scalar value or explicitly clear an inherited one.
 data ScalarOverride a
   = SetScalar a
   | ClearScalar
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+-- | Append to an inherited list or replace it entirely. Replacing with an
+-- empty list clears the field.
 data ListOverride a
   = AppendList [a]
   | ReplaceList [a]
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+-- | Merge named rubric criteria with inherited ones or replace the rubric.
+-- A criterion in the child replaces its entire parent definition.
 data RubricOverride
   = MergeRubric (Map Text RubricCriterion)
   | ReplaceRubric (Map Text RubricCriterion)
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
 
+-- | One named rubric criterion. Its weight must be finite and nonnegative;
+-- a supplied description must contain non-whitespace text.
 data RubricCriterion = RubricCriterion
   { weight :: Double
   , description :: Maybe Text
@@ -149,6 +162,8 @@ instance FromJSON ContextLayer where
       ]
     pure layer
 
+-- | Require exactly the listed keys in a tagged operation object.
+-- Non-object values are left to the operation's decoder.
 checkShape :: String -> [Key] -> Value -> Parser ()
 checkShape fieldName requiredKeys (Object object)
   | Set.fromList (KeyMap.keys object) /= Set.fromList requiredKeys =
@@ -156,16 +171,19 @@ checkShape fieldName requiredKeys (Object object)
   | otherwise = pure ()
 checkShape _ _ _ = pure ()
 
+-- | Reject a blank supplied scalar while allowing inheritance and clearing.
 validateScalar :: String -> Maybe (ScalarOverride Text) -> Parser ()
 validateScalar field (Just (SetScalar text))
   | Text.null (Text.strip text) = fail (field <> " must not be blank")
 validateScalar _ _ = pure ()
 
+-- | Check every supplied item for either list operation.
 validateList :: String -> Maybe (ListOverride Text) -> Parser ()
 validateList field (Just (AppendList items)) = validateItems field items
 validateList field (Just (ReplaceList items)) = validateItems field items
 validateList _ Nothing = pure ()
 
+-- | Reject whitespace-only list items without changing valid text.
 validateItems :: String -> [Text] -> Parser ()
 validateItems field items
   | any (Text.null . Text.strip) items = fail (field <> " must not contain blank items")
