@@ -105,6 +105,9 @@ tests = TestList
   , TestLabel "ready response json" readyResponseJson
   , TestLabel "context layer merge rules" contextLayerMergeRules
   , TestLabel "context layer JSON representation" contextLayerJson
+  , TestLabel "context layer rejects blank strings" contextLayerRejectsBlankStrings
+  , TestLabel "context layer rejects invalid operation shapes" contextLayerRejectsInvalidOperationShapes
+  , TestLabel "context layer validates rubric criteria" contextLayerValidatesRubricCriteria
   , TestLabel "load one context layer" loadOneContextLayer
   , TestLabel "validate essay path for context" validateEssayPathForContext
   , TestLabel "resolve inherited context files" resolveInheritedContextFiles
@@ -350,6 +353,57 @@ contextLayerJson = TestCase $ do
           }
   assertEqual "documented JSON decodes" (Just expected) (decode source)
   assertEqual "layer JSON round-trips" (Just expected) (decode (encode expected))
+
+contextLayerRejectsBlankStrings :: Test
+contextLayerRejectsBlankStrings = TestCase $ do
+  let invalidSources :: [(String, BL.ByteString)]
+      invalidSources =
+        [ ("blank title", "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"\"}}")
+        , ("blank audience", "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"  \"}}")
+        , ("escaped whitespace model", "{\"model\":{\"tag\":\"SetScalar\",\"contents\":\"\\u0020\\t\"}}")
+        , ("blank appended tag", "{\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"valid\",\"  \"]}}")
+        , ("blank replaced instruction", "{\"instructions\":{\"tag\":\"ReplaceList\",\"contents\":[\"\"]}}")
+        , ("blank grading direction", "{\"grading_directions\":{\"tag\":\"AppendList\",\"contents\":[\"\\t\"]}}")
+        ]
+  mapM_
+    (\(label, source) -> assertEqual label (Nothing :: Maybe ContextType.ContextLayer) (decode source))
+    invalidSources
+
+contextLayerRejectsInvalidOperationShapes :: Test
+contextLayerRejectsInvalidOperationShapes = TestCase $ do
+  let invalidSources :: [(String, BL.ByteString)]
+      invalidSources =
+        [ ("ClearScalar with contents", "{\"model\":{\"tag\":\"ClearScalar\",\"contents\":\"ignored\"}}")
+        , ("SetScalar with extra field", "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"Essay\",\"extra\":1}}")
+        , ("SetScalar without contents", "{\"title\":{\"tag\":\"SetScalar\"}}")
+        , ("AppendList with extra field", "{\"tags\":{\"tag\":\"AppendList\",\"contents\":[],\"extra\":1}}")
+        , ("ReplaceList without contents", "{\"instructions\":{\"tag\":\"ReplaceList\"}}")
+        , ("ReplaceList with extra field", "{\"instructions\":{\"tag\":\"ReplaceList\",\"contents\":[],\"extra\":1}}")
+        , ("MergeRubric with extra field", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{},\"extra\":1}}")
+        , ("ReplaceRubric without contents", "{\"rubric\":{\"tag\":\"ReplaceRubric\"}}")
+        , ("ReplaceRubric with extra field", "{\"rubric\":{\"tag\":\"ReplaceRubric\",\"contents\":{},\"extra\":1}}")
+        ]
+  mapM_
+    (\(label, source) -> assertEqual label (Nothing :: Maybe ContextType.ContextLayer) (decode source))
+    invalidSources
+
+contextLayerValidatesRubricCriteria :: Test
+contextLayerValidatesRubricCriteria = TestCase $ do
+  let invalidSources :: [(String, BL.ByteString)]
+      invalidSources =
+        [ ("blank merged criterion name", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"  \":{\"weight\":1}}}}")
+        , ("blank replaced criterion name", "{\"rubric\":{\"tag\":\"ReplaceRubric\",\"contents\":{\"\":{\"weight\":1}}}}")
+        , ("negative weight", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"clarity\":{\"weight\":-1}}}}")
+        , ("non-finite weight", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"clarity\":{\"weight\":1e9999}}}}")
+        , ("missing weight", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"clarity\":{}}}}")
+        , ("blank description", "{\"rubric\":{\"tag\":\"MergeRubric\",\"contents\":{\"clarity\":{\"weight\":1,\"description\":\"  \"}}}}")
+        ]
+  mapM_
+    (\(label, source) -> assertEqual label (Nothing :: Maybe ContextType.ContextLayer) (decode source))
+    invalidSources
+  case decode "{\"rubric\":{\"tag\":\"ReplaceRubric\",\"contents\":{\"clarity\":{\"weight\":0}}}}" :: Maybe ContextType.ContextLayer of
+    Nothing -> assertFailure "zero-weight rubric criterion should be valid in a layer"
+    Just _ -> pure ()
 
 loadOneContextLayer :: Test
 loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
