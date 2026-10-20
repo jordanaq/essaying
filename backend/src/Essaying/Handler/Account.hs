@@ -6,6 +6,7 @@ module Essaying.Handler.Account
 where
 
 import Data.Text (Text)
+import Essaying.API.V1 (ContextApi)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
 import Essaying.Handler.Workspace (workspaceHandler)
@@ -33,7 +34,7 @@ import Essaying.Types.Workspace
   , WorkspaceTreeResponse
   , SaveWorkspaceEssayRequest
   )
-import Servant (Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
+import Servant (Server, Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
 
 type WorkspaceRoutes =
   Handler WorkspaceTreeResponse
@@ -41,6 +42,7 @@ type WorkspaceRoutes =
     :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
     :<|> ([Text] -> Handler NoContent)
     :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
+    :<|> Server ContextApi
 
 accountHandler ::
   Handler [AccountProfile]

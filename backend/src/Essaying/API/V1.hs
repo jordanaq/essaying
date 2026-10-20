@@ -3,10 +3,12 @@
 
 module Essaying.API.V1 (
     Api,
+    ContextApi,
 )
 where
 
 import Data.Text (Text)
+import Essaying.Types.Context (ContextLayer, EffectiveContext, CreateContextRequest, UpdateContextRequest, DeleteContextRequest)
 import Essaying.Types.Health (HealthResponse, ReadyResponse)
 import Essaying.Types.Account (AccountProfile, CreateAccountRequest, UpdateAccountRequest)
 import Essaying.Types.Workspace (
@@ -17,7 +19,7 @@ import Essaying.Types.Workspace (
     WorkspaceNode,
     WorkspaceTreeResponse,
  )
-import Servant (Capture, CaptureAll, DeleteNoContent, Get, JSON, Patch, PostCreated, Put, ReqBody, (:<|>) (..), (:>))
+import Servant (Capture, CaptureAll, DeleteNoContent, Get, JSON, Patch, QueryParam', Required, Strict, PostCreated, Put, ReqBody, (:<|>) (..), (:>))
 
 type Api =
     "api"
@@ -42,7 +44,17 @@ type Api =
                                                     :<|> "essays" :> ReqBody '[JSON] CreateWorkspaceEssayRequest :> PostCreated '[JSON] WorkspaceEssayContent
                                                     :<|> "directories" :> CaptureAll "path" Text :> DeleteNoContent
                                                     :<|> "directories" :> ReqBody '[JSON] CreateWorkspaceDirectoryRequest :> PostCreated '[JSON] WorkspaceNode
+                                                    :<|> "context" :> ContextApi
                                                )
                                    )
                        )
            )
+
+-- | Paths identify workspace-relative context.json files, except for effective
+-- context, whose path identifies an essay. Filesystem roots stay server-side.
+type ContextApi =
+    "effective" :> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] EffectiveContext
+        :<|> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] ContextLayer
+        :<|> ReqBody '[JSON] CreateContextRequest :> PostCreated '[JSON] ContextLayer
+        :<|> ReqBody '[JSON] UpdateContextRequest :> Put '[JSON] ContextLayer
+        :<|> ReqBody '[JSON] DeleteContextRequest :> DeleteNoContent

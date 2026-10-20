@@ -5,8 +5,10 @@ module Essaying.Handler.Workspace
   )
 where
 
+import Essaying.API.V1 (ContextApi)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
+import Essaying.Handler.Context (contextHandler)
 import Essaying.Persistence.Workspace
   ( createWorkspaceDirectory
   , createWorkspaceEssay
@@ -31,7 +33,7 @@ import Essaying.Types.Workspace
   , WorkspaceDeleteResult (..)
   )
 import Essaying.Types.Storage (WorkspaceRoot)
-import Servant (Handler, NoContent (NoContent), err400, err403, err404, err409, throwError, (:<|>) (..))
+import Servant (Server, Handler, NoContent (NoContent), err400, err403, err404, err409, throwError, (:<|>) (..))
 
 workspaceHandler ::
   Text ->
@@ -40,12 +42,14 @@ workspaceHandler ::
     :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
     :<|> ([Text] -> Handler NoContent)
     :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
+    :<|> Server ContextApi
 workspaceHandler accountIdText =
   listWorkspaceTreeHandler accountIdText
     :<|> essayRoutes accountIdText
     :<|> createWorkspaceEssayHandler accountIdText
     :<|> deleteWorkspaceDirectoryHandler accountIdText
     :<|> createWorkspaceDirectoryHandler accountIdText
+    :<|> contextHandler (resolveWorkspaceRoot accountIdText)
 
 essayRoutes :: Text -> [Text] -> Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)
 essayRoutes accountIdText essayPath =

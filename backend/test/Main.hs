@@ -5,6 +5,8 @@
 
 module Main where
 
+import ContextHandlers qualified
+
 import ContextAcceptance qualified
 import Control.Exception (finally)
 import Control.Monad (when)
@@ -38,7 +40,8 @@ import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Context
-  ( ContextLayerError (..)
+  ( ContextLayer, CreateContextRequest (..), UpdateContextRequest (..), DeleteContextRequest (..)
+  , ContextLayerError (..)
   , EffectiveContext (..)
   , EffectiveContextError (..)
   , ListOverride (..)
@@ -90,6 +93,11 @@ type WorkspaceClientRoutes =
     :<|> (CreateWorkspaceEssayRequest -> ClientM WorkspaceEssayContent)
     :<|> ([Text] -> ClientM NoContent)
     :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
+    :<|> ((FilePath -> ClientM EffectiveContext)
+      :<|> (FilePath -> ClientM ContextLayer)
+      :<|> (CreateContextRequest -> ClientM ContextLayer)
+      :<|> (UpdateContextRequest -> ClientM ContextLayer)
+      :<|> (DeleteContextRequest -> ClientM NoContent))
 
 accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
 (healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
@@ -101,7 +109,8 @@ main = do
 
 tests :: Test
 tests = TestList
-  [ TestLabel "context acceptance" ContextAcceptance.tests
+  [ ContextHandlers.tests
+  , TestLabel "context acceptance" ContextAcceptance.tests
   , TestLabel "health response value" healthResponseValue
   , TestLabel "health response json" healthResponseJson
   , TestLabel "ready response value" readyResponseValue
@@ -116,6 +125,7 @@ tests = TestList
   , TestLabel "resolve inherited context files" resolveInheritedContextFiles
   , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
   , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
+  , TestLabel "context API mutations" contextApiMutations
   , TestLabel "health endpoint" healthEndpoint
   , TestLabel "ready endpoint" readyEndpoint
   , TestLabel "list accounts endpoint with sample cache" listAccountsEndpointWithSampleCache
@@ -239,7 +249,7 @@ workspaceDeleteEndpoints = TestCase $
         manager <- newManager defaultManagerSettings
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
             _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "delete-test"
-            _ :<|> essayRoutes :<|> _ :<|> deleteDirectory :<|> _ = workspaceRoutes
+            _ :<|> essayRoutes :<|> _ :<|> deleteDirectory :<|> _ :<|> _ = workspaceRoutes
             _ :<|> (_ :<|> deleteEssay) = essayRoutes ["Remove Me.md"]
 
         essayResult <- runClientM deleteEssay env
@@ -710,3 +720,37 @@ ensureCleanDir dirPath = do
   exists <- doesDirectoryExist dirPath
   when exists $ removePathForcibly dirPath
   createDirectoryIfMissing True dirPath
+
+-- Exercise the account/workspace route wiring through the generated client.
+contextApiMutations :: Test
+contextApiMutations = TestCase $
+  withEphemeralCacheRoot $ \cachePath ->
+    withEnvVar "HESSAY_CACHE" (Just cachePath) $
+      testWithApplication (pure app) $ \port -> do
+        manager <- newManager defaultManagerSettings
+        let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+            _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "contextapi"
+            _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> contextRoutes = workspaceRoutes
+            _ :<|> _ :<|> createLayer :<|> updateLayer :<|> deleteLayer = contextRoutes
+            layer = ContextType.ContextLayer Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+            updated = layer {ContextType.title = Just (SetScalar "Updated")}
+            root = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) (AccountId "contextapi"))
+        account <- runClientM (createAccountClient (CreateAccountRequest "ContextAPI" Nothing)) env
+        case account of
+          Left err -> assertFailure (show err)
+          Right _ -> pure ()
+        created <- runClientM (createLayer (CreateContextRequest "context.json" layer)) env
+        case created of
+          Left err -> assertFailure (show err)
+          Right actual -> assertEqual "create returns layer" layer actual
+        assertEqual "create persists to selected account" (Right (Just layer)) =<< loadContextLayer root "context.json"
+        saved <- runClientM (updateLayer (UpdateContextRequest "context.json" updated)) env
+        case saved of
+          Left err -> assertFailure (show err)
+          Right actual -> assertEqual "update returns layer" updated actual
+        assertEqual "update persists layer" (Right (Just updated)) =<< loadContextLayer root "context.json"
+        deleted <- runClientM (deleteLayer (DeleteContextRequest "context.json")) env
+        case deleted of
+          Left err -> assertFailure (show err)
+          Right actual -> assertEqual "delete returns no content" NoContent actual
+        assertEqual "delete removes layer" (Right Nothing) =<< loadContextLayer root "context.json"
