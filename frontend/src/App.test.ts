@@ -198,6 +198,64 @@ describe("App account login flow", () => {
     expect(await screen.findByText("Draft saved for History/French Revolution/notes.md")).toBeInTheDocument();
   });
 
+  it.each(["mrroww", ""])("clears the editor after loading and editing an essay starting with %j", async (initialMarkdown) => {
+    localStorage.setItem("essay-account-id", "alice");
+    const populatedPath = ["meow", "meoww.md"];
+    const emptyPath = ["meow", "meow in", "essay.md"];
+    const fetchMock = createApiAwareFetchMock([
+      jsonResponse(200, [
+        { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: null }
+      ]),
+      jsonResponse(200, {
+        tree: [{
+          name: "meow", path: ["meow"], nodeType: "WorkspaceDirectoryNode",
+          children: [
+            { name: "meoww.md", path: populatedPath, nodeType: "WorkspaceEssayNode", children: [] },
+            {
+              name: "meow in", path: ["meow", "meow in"], nodeType: "WorkspaceDirectoryNode",
+              children: [{ name: "essay.md", path: emptyPath, nodeType: "WorkspaceEssayNode", children: [] }]
+            }
+          ]
+        }]
+      }),
+      jsonResponse(200, { path: populatedPath, title: "meoww", markdown: initialMarkdown }),
+      jsonResponse(200, { path: emptyPath, title: "essay", markdown: "" }),
+      jsonResponse(200, { path: emptyPath, title: "essay", markdown: "" })
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(App);
+    const editor = await waitFor(() => {
+      const element = container.querySelector("sl-textarea") as
+        (HTMLElement & { value: string; updateComplete: Promise<boolean> }) | null;
+      expect(element?.value).toBe(initialMarkdown);
+      return element!;
+    });
+
+    const emptyItem = await waitFor(() => {
+      const item = Array.from(container.querySelectorAll("sl-tree-item"))
+        .find((item) => item.getAttribute("data-path") === JSON.stringify(emptyPath));
+      expect(item).toBeDefined();
+      return item!;
+    });
+    editor.value = "mrroww";
+    await fireEvent(editor, new CustomEvent("sl-input", { bubbles: true, composed: true }));
+    await fireEvent(container.querySelector("sl-tree")!, new CustomEvent("sl-selection-change", {
+      detail: { selection: [emptyItem] }, bubbles: true
+    }));
+
+    await screen.findByText("Currently editing meow/meow in/essay.md.");
+    await waitFor(() => expect(editor.value).toBe(""));
+    await editor.updateComplete;
+    expect(editor.shadowRoot?.querySelector("textarea")).toHaveValue("");
+
+    await fireEvent.click(screen.getByText("Save Draft"));
+    await waitFor(() => {
+      const saveCall = apiCalls(fetchMock).find(([, init]) => init?.method === "PUT");
+      expect(saveCall?.[0]).toBe("/api/v1/accounts/alice/workspace/essays/meow/meow%20in/essay.md");
+      expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ markdown: "" });
+    });
+  });
+
   it("creates an account and logs in on success", async () => {
     const fetchMock = createApiAwareFetchMock([
       jsonResponse(200, []),
