@@ -1,13 +1,18 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Persistence.Context
   ( loadContextLayer
   , loadEffectiveContext
+  , saveContextLayer
+  , deleteContextLayer
   )
 where
 
 import Control.Exception (IOException, try)
 import Control.Monad (foldM)
+import Data.Aeson (encode)
+import Data.ByteString.Lazy qualified as BL
 import Data.Aeson.Parser (eitherDecodeStrictWith, jsonNoDup')
 import Data.Aeson.Types (ifromJSON)
 import Data.Attoparsec.ByteString (endOfInput, skipWhile)
@@ -19,7 +24,7 @@ import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePa
 import Essaying.Types.Context (ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Utils (debug_)
-import System.Directory (doesFileExist, pathIsSymbolicLink)
+import System.Directory (doesFileExist, pathIsSymbolicLink, removeFile)
 import System.FilePath ((</>), isAbsolute, makeRelative)
 import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
 
@@ -153,3 +158,43 @@ checkEntries root (fullPath : remaining) = do
 -- The low-level duplicate-checking parser alone accepts trailing input.
 isJsonSpace :: Word8 -> Bool
 isJsonSpace byte = byte == 32 || byte == 10 || byte == 13 || byte == 9
+
+-- | Write a validated layer below a trusted workspace root. Parent directories
+-- must already exist; symbolic links are rejected just as they are on reads.
+saveContextLayer :: WorkspaceRoot -> FilePath -> ContextLayer -> IO (Either ContextLayerError ())
+saveContextLayer workspace path layer = do
+  target <- resolveContextTarget workspace path
+  case target of
+    Left err -> pure (Left err)
+    Right (fullPath, _) -> do
+      let bytes = BL.toStrict (encode layer)
+      case eitherDecodeStrictWith (jsonNoDup' <* skipWhile isJsonSpace <* endOfInput) ifromJSON bytes of
+        Left (_, message) -> pure (Left (ContextLayerJsonError path message))
+        Right (_ :: ContextLayer) -> do
+          result <- try (BS.writeFile fullPath bytes) :: IO (Either IOException ())
+          pure $ case result of
+            Left err -> Left (ContextLayerIoError path (ioeGetErrorString err))
+            Right () -> Right ()
+
+-- | Delete only a workspace-relative context file. False means it was absent.
+deleteContextLayer :: WorkspaceRoot -> FilePath -> IO (Either ContextLayerError Bool)
+deleteContextLayer workspace path = do
+  target <- resolveContextTarget workspace path
+  case target of
+    Left err -> pure (Left err)
+    Right (_, False) -> pure (Right False)
+    Right (fullPath, True) -> do
+      result <- try (removeFile fullPath) :: IO (Either IOException ())
+      pure $ case result of
+        Left err -> Left (ContextLayerIoError path (ioeGetErrorString err))
+        Right () -> Right True
+
+-- | Resolve paths from the workspace, never from the process working directory.
+resolveContextTarget :: WorkspaceRoot -> FilePath -> IO (Either ContextLayerError (FilePath, Bool))
+resolveContextTarget (WorkspaceRoot root) path =
+  case contextSegments path of
+    Nothing -> pure (Left (ContextLayerInvalidPath path))
+    Just segments -> do
+      let paths = scanl (</>) root segments
+      checked <- checkEntries root paths
+      pure $ fmap (\exists -> (last paths, exists)) checked

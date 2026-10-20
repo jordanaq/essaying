@@ -16,6 +16,10 @@ module Essaying.Types.Context
     -- * Loading errors
   , ContextLayerError (..)
   , EffectiveContextError (..)
+    -- * Context mutation requests (workspace root is supplied by the server)
+  , CreateContextRequest (..)
+  , UpdateContextRequest (..)
+  , DeleteContextRequest (..)
   )
 where
 
@@ -117,6 +121,26 @@ data EffectiveContextError
   | EffectiveContextJsonError FilePath String
   | EffectiveContextLayerError ContextLayerError
   deriving stock (Eq, Show)
+
+data CreateContextRequest = CreateContextRequest
+  { path :: FilePath
+  , contextLayer :: ContextLayer
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data UpdateContextRequest = UpdateContextRequest
+  { path :: FilePath
+  , contextLayer :: ContextLayer
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data DeleteContextRequest = DeleteContextRequest
+  { path :: FilePath
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance FromJSON a => FromJSON (ScalarOverride a) where
   parseJSON value = do
