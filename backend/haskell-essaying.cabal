@@ -2,6 +2,10 @@ cabal-version:      3.8
 name:               haskell-essaying
 version:            0.1.0.0
 build-type:         Simple
+extra-source-files:
+    data/sample/context.json
+    data/sample/History/context.json
+    data/sample/History/French-Revolution/context.json
 
 common warnings
   ghc-options:      -Wall
@@ -31,6 +35,7 @@ executable haskell-essaying
   build-depends:
       base >=4.18 && <5
     , aeson >=2.2
+    , attoparsec >=0.14
     , attoparsec-aeson >=2.2
     , bytestring >=0.11
     , containers >=0.6
@@ -43,7 +48,6 @@ executable haskell-essaying
     , wai-extra >=3.1
     , wai >=3.2
     , warp >=3.3
-    , yaml >=0.11
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N
 
 test-suite haskell-essaying-test
@@ -52,7 +56,8 @@ test-suite haskell-essaying-test
   hs-source-dirs:   test, src
   main-is:          Main.hs
   other-modules:
-      Essaying.Context
+      ContextAcceptance
+    , Essaying.Context
     , Essaying.API.V1
     , Essaying.Handler.Account
     , Essaying.Handler.Health
@@ -71,6 +76,7 @@ test-suite haskell-essaying-test
   build-depends:
       base >=4.18 && <5
     , aeson >=2.2
+    , attoparsec >=0.14
     , attoparsec-aeson >=2.2
     , bytestring >=0.11
     , containers >=0.6

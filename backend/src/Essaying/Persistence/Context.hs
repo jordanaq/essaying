@@ -10,8 +10,10 @@ import Control.Exception (IOException, try)
 import Control.Monad (foldM)
 import Data.Aeson.Parser (eitherDecodeStrictWith, jsonNoDup')
 import Data.Aeson.Types (ifromJSON)
+import Data.Attoparsec.ByteString (endOfInput, skipWhile)
 import Data.ByteString qualified as BS
 import Data.Text qualified as Text
+import Data.Word (Word8)
 import Essaying.Context (emptyEffectiveContext, applyLayer)
 import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePath)
 import Essaying.Types.Context (ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
@@ -105,7 +107,7 @@ loadContextLayer (WorkspaceRoot root) relativePath =
           case contents of
             Left err -> pure (Left (ContextLayerIoError relativePath (ioeGetErrorString err)))
             Right bytes ->
-              case eitherDecodeStrictWith jsonNoDup' ifromJSON bytes of
+              case eitherDecodeStrictWith (jsonNoDup' <* skipWhile isJsonSpace <* endOfInput) ifromJSON bytes of
                 Left (_, message) -> do
                   debug 3 $ "Invalid context file=" <> show relativePath <> ": " <> message
                   pure (Left (ContextLayerJsonError relativePath message))
@@ -146,3 +148,8 @@ checkEntries root (fullPath : remaining) = do
       | isDoesNotExistError err && null remaining -> pure (Right False)
       | isDoesNotExistError err -> pure (Left (ContextLayerInvalidPath label))
       | otherwise -> pure (Left (ContextLayerIoError label (ioeGetErrorString err)))
+
+-- | JSON permits only these four whitespace bytes after the single document.
+-- The low-level duplicate-checking parser alone accepts trailing input.
+isJsonSpace :: Word8 -> Bool
+isJsonSpace byte = byte == 32 || byte == 10 || byte == 13 || byte == 9

@@ -77,7 +77,7 @@ safeResolvePath workspaceRoot segments =
 -- | Recursively walk the workspace directory and produce a tree of
 -- 'WorkspaceNode' values.  Directories become 'WorkspaceDirectoryNode';
 -- @.md@ files become 'WorkspaceEssayNode'.  Non-@.md@ files (e.g.
--- @context.yaml@) are skipped.
+-- @context.json@) are skipped.
 listWorkspaceTree :: WorkspaceRoot -> IO [WorkspaceNode]
 listWorkspaceTree workspaceRoot = listWorkspaceTreeAt [] (unWorkspaceRoot workspaceRoot)
 

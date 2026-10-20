@@ -1,0 +1,21 @@
+{
+  "title": {
+    "tag": "SetScalar",
+    "contents": "History Essays"
+  },
+  "instructions": {
+    "tag": "AppendList",
+    "contents": [
+      "Prioritize historical context and chronology."
+    ]
+  },
+  "rubric": {
+    "tag": "MergeRubric",
+    "contents": {
+      "historical_accuracy": {
+        "weight": 0.5,
+        "description": "Facts and sequence of events are correct."
+      }
+    }
+  }
+}

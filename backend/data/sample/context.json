@@ -1,0 +1,34 @@
+{
+  "title": {
+    "tag": "SetScalar",
+    "contents": "Essay Workspace"
+  },
+  "audience": {
+    "tag": "SetScalar",
+    "contents": "student"
+  },
+  "model": {
+    "tag": "SetScalar",
+    "contents": "llama3.1:8b"
+  },
+  "instructions": {
+    "tag": "AppendList",
+    "contents": [
+      "Keep writing concise and clear.",
+      "Use markdown headings when useful."
+    ]
+  },
+  "rubric": {
+    "tag": "MergeRubric",
+    "contents": {
+      "clarity": {
+        "weight": 0.4,
+        "description": "Writing is coherent and easy to follow."
+      },
+      "evidence": {
+        "weight": 0.6,
+        "description": "Claims are supported by references or examples."
+      }
+    }
+  }
+}

@@ -5,6 +5,7 @@
 
 module Main where
 
+import ContextAcceptance qualified
 import Control.Exception (finally)
 import Control.Monad (when)
 import Data.Aeson (decode, encode)
@@ -100,7 +101,8 @@ main = do
 
 tests :: Test
 tests = TestList
-  [ TestLabel "health response value" healthResponseValue
+  [ TestLabel "context acceptance" ContextAcceptance.tests
+  , TestLabel "health response value" healthResponseValue
   , TestLabel "health response json" healthResponseJson
   , TestLabel "ready response value" readyResponseValue
   , TestLabel "ready response json" readyResponseJson
@@ -129,7 +131,7 @@ workspacePathHelpers :: Test
 workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "essay filename gets markdown extension" "My Essay.md" (essayFileName "My Essay")
   assertEqual "markdown files are essays" True (isEssayFile "essay.md")
-  assertEqual "other files are not essays" False (isEssayFile "context.yaml")
+  assertEqual "other files are not essays" False (isEssayFile "context.json")
   assertEqual "ordinary segment is safe" True (isSafeSegment "History")
   assertEqual "empty segment is unsafe" False (isSafeSegment "")
   assertEqual "dot-dot segment is unsafe" False (isSafeSegment "..")
@@ -173,10 +175,10 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
       [WorkspaceNode "French-Revolution.md" ["History", "French-Revolution.md"] WorkspaceEssayNode []]]
     tree
-  writeFile (rootPath </> "History" </> "context.yaml") "private context"
-  invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.yaml"]
+  writeFile (rootPath </> "History" </> "context.json") "private context"
+  invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.json"]
   assertEqual "non-essay target is distinguished"
-    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "context.yaml"]))
+    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "context.json"]))
     invalidEssayDelete
   missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing.md"]
   assertEqual "missing essay is distinguished"
@@ -573,16 +575,27 @@ healthEndpoint = TestCase $
       Right response -> assertEqual "health endpoint should return ok" (HealthResponse {status = "ok"}) response
 
 readyEndpoint :: Test
-readyEndpoint = TestCase $
-  testWithApplication (pure app) $ \port -> do
-    manager <- newManager defaultManagerSettings
-    let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
-    result <- runClientM readyClient env
-    case result of
-      Left err -> assertFailure (show err)
-      Right response -> do
-        assertEqual "ready endpoint message" "System Ready" (message response)
-        assertEqual "ready endpoint sample context" emptyEffectiveContext (sampleContext response)
+readyEndpoint = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let profile = AccountProfile (AccountId "alice") "Alice" Nothing
+      WorkspaceRoot root = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) (accountId profile))
+  writeAccountProfileFixture cachePath profile
+  createDirectoryIfMissing True root
+  withEnvVar "HESSAY_CACHE" (Just cachePath) $
+    testWithApplication (pure app) $ \port -> do
+      manager <- newManager defaultManagerSettings
+      let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
+          checkReady = do
+            result <- runClientM readyClient env
+            case result of
+              Left err -> assertFailure (show err)
+              Right response -> do
+                assertEqual "ready endpoint message" "System Ready" (message response)
+                assertEqual "readiness remains independent of user context" emptyEffectiveContext (sampleContext response)
+      checkReady
+      writeFile (root </> "context.json") "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"User context\"}}"
+      checkReady
+      writeFile (root </> "context.json") "{invalid"
+      checkReady
 
 listAccountsEndpointWithSampleCache :: Test
 listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cachePath -> do

@@ -1,0 +1,22 @@
+{
+  "audience": {
+    "tag": "SetScalar",
+    "contents": "advanced-high-school"
+  },
+  "instructions": {
+    "tag": "AppendList",
+    "contents": [
+      "Compare short-term and long-term causes.",
+      "Distinguish social, political, and economic factors."
+    ]
+  },
+  "rubric": {
+    "tag": "MergeRubric",
+    "contents": {
+      "argumentation": {
+        "weight": 0.5,
+        "description": "Builds a defensible thesis and supports it."
+      }
+    }
+  }
+}
