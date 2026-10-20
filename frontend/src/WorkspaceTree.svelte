@@ -36,6 +36,10 @@
     return (typeof node.nodeType === "string" ? node.nodeType : node.nodeType.tag) === "WorkspaceDirectoryNode";
   }
 
+  $: sortedNodes = [...nodes].sort((left, right) =>
+    Number(isDirectory(right)) - Number(isDirectory(left)) || left.name.localeCompare(right.name)
+  );
+
   function isExpanded(path: string[]) {
     return expandedPaths.some((expandedPath) => samePath(expandedPath, path));
   }
@@ -118,7 +122,7 @@
           ></sl-icon-button>
         </span>
       </span>
-    {#each nodes as node (node.path.join("/"))}
+    {#each sortedNodes as node (node.path.join("/"))}
       <sl-tree-item
         data-path={JSON.stringify(node.path)}
         expanded={isExpanded(node.path)}
@@ -184,7 +188,7 @@
     </sl-tree-item>
   </sl-tree>
 {:else}
-  {#each nodes as node (node.path.join("/"))}
+  {#each sortedNodes as node (node.path.join("/"))}
     <sl-tree-item
       data-path={JSON.stringify(node.path)}
       expanded={isExpanded(node.path)}
