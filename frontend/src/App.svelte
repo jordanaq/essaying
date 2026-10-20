@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import ContextPanel from "./ContextPanel.svelte";
   import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
   import "@shoelace-style/shoelace/dist/components/badge/badge.js";
   import "@shoelace-style/shoelace/dist/components/button/button.js";
@@ -94,6 +95,7 @@
   let workspaceDeleteBusy = false;
   let savingDraft = false;
   let theme: "macchiato" | "latte" = "macchiato";
+  let activeFeedbackTab: "context" | "feedback" = "context";
   let panelState = {
     tree: true,
     editor: true,
@@ -104,7 +106,7 @@
   $: panelColumns = [
     panelState.tree ? "260px" : "56px",
     panelState.editor ? "minmax(480px, 1fr)" : "56px",
-    panelState.feedback ? "340px" : "56px"
+    panelState.feedback ? "380px" : "56px"
   ].join(" ");
 
   onMount(() => {
@@ -609,6 +611,18 @@
     };
   }
 
+  function handleFeedbackTabKeydown(event: KeyboardEvent) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    activeFeedbackTab = event.key === "Home" ? "context"
+      : event.key === "End" ? "feedback"
+      : activeFeedbackTab === "context" ? "feedback" : "context";
+    const tab = (event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(
+      `#${activeFeedbackTab}-tab`
+    );
+    tab?.focus();
+  }
+
   function expandAllPanels() {
     panelState = {
       tree: true,
@@ -821,7 +835,7 @@
   {:else}
   <div class="topbar">
     <div>
-      <sl-badge variant="primary" pill>Backend-first UI stub</sl-badge>
+      <sl-badge variant="primary" pill>Writing workspace</sl-badge>
       <h1>Essaying Workbench</h1>
       <p class="session-hint">Logged in as {activeAccount.displayName} ({activeAccount.accountId.unAccountId})</p>
     </div>
@@ -849,9 +863,9 @@
   <div class="grid" style={`--panel-cols: ${panelColumns};`}>
     <sl-card class={`panel ${panelState.tree ? "" : "is-collapsed"}`}>
       <div slot="header" class={`panel-header tree-panel-header ${panelState.tree ? "" : "is-tree-collapsed"}`}>
-        <div>
-          <h2>{panelState.tree ? "Folder Tree" : "Tree"}</h2>
-        </div>
+        {#if panelState.tree}
+          <div><h2>Folder Tree</h2></div>
+        {/if}
         <div class="tree-toolbar">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-icon-button
@@ -962,15 +976,19 @@
 
     <sl-card class={`panel ${panelState.editor ? "" : "is-collapsed"}`}>
       <div slot="header" class="panel-header">
-        <h2>{panelState.editor ? "Markdown Editor" : "Editor"}</h2>
+        {#if panelState.editor}<h2>Markdown Editor</h2>{/if}
         <div class="panel-header-controls">
           {#if panelState.editor}
             <sl-badge>{workspaceSelectionLabel}</sl-badge>
           {/if}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button size="small" variant="default" on:click={() => togglePanel("editor")}>
-            {panelState.editor ? "Collapse" : "Expand"}
-          </sl-button>
+          {#if panelState.editor}
+            <sl-button size="small" variant="default" on:click={() => togglePanel("editor")}>
+              Collapse
+            </sl-button>
+          {:else}
+            <sl-icon-button name="chevron-bar-right" label="Expand markdown editor" title="Expand markdown editor" on:click={() => togglePanel("editor")}></sl-icon-button>
+          {/if}
         </div>
       </div>
 
@@ -1008,37 +1026,59 @@
 
     <sl-card class={`panel ${panelState.feedback ? "" : "is-collapsed"}`}>
       <div slot="header" class="panel-header">
-        <h2>{panelState.feedback ? "AI Feedback" : "Feedback"}</h2>
+        {#if panelState.feedback}
+          <div class="panel-tabs" role="tablist" aria-label="Context and feedback">
+            <button
+              type="button" role="tab" id="context-tab" aria-controls="context-tabpanel"
+              aria-selected={activeFeedbackTab === "context"} tabindex={activeFeedbackTab === "context" ? 0 : -1}
+              on:click={() => activeFeedbackTab = "context"} on:keydown={handleFeedbackTabKeydown}
+            >Context</button>
+            <button
+              type="button" role="tab" id="feedback-tab" aria-controls="feedback-tabpanel"
+              aria-selected={activeFeedbackTab === "feedback"} tabindex={activeFeedbackTab === "feedback" ? 0 : -1}
+              on:click={() => activeFeedbackTab = "feedback"} on:keydown={handleFeedbackTabKeydown}
+            >Feedback</button>
+          </div>
+        {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <sl-button size="small" variant="default" on:click={() => togglePanel("feedback")}>
-          {panelState.feedback ? "Collapse" : "Expand"}
-        </sl-button>
+        {#if panelState.feedback}
+          <sl-button size="small" variant="default" on:click={() => togglePanel("feedback")}>
+            Collapse
+          </sl-button>
+        {:else}
+          <sl-icon-button name="chevron-bar-left" label="Expand context and feedback" title="Expand context and feedback" on:click={() => togglePanel("feedback")}></sl-icon-button>
+        {/if}
       </div>
 
       {#if panelState.feedback}
-        <sl-input label="Backend status" value={backendMessage} readonly></sl-input>
-
-        <div class="backend-meta">
-          <sl-badge variant="neutral">Title: {backendContextTitle}</sl-badge>
-          <sl-badge variant="neutral">Model: {backendContextModel}</sl-badge>
-          <sl-badge variant="neutral">Instructions: {backendInstructionCount}</sl-badge>
+        <div id="context-tabpanel" role="tabpanel" aria-labelledby="context-tab" tabindex="0" hidden={activeFeedbackTab !== "context"}>
+          {#key activeAccountId}
+            <ContextPanel
+              accountId={activeAccount.accountId.unAccountId}
+              directoryPath={selectedWorkspaceDirectoryPath}
+              essayPath={selectedWorkspaceEssay?.path ?? null}
+            />
+          {/key}
         </div>
+        <div id="feedback-tabpanel" role="tabpanel" aria-labelledby="feedback-tab" tabindex="0" hidden={activeFeedbackTab !== "feedback"}>
+          <sl-input label="Backend status" value={backendMessage} readonly></sl-input>
 
-        <sl-textarea
-          style="margin-top: 10px"
-          label="Streaming Grade Output"
-          rows="14"
-          value={gradeStream}
-          readonly
-        ></sl-textarea>
+          <div class="backend-meta">
+            <sl-badge variant="neutral">Title: {backendContextTitle}</sl-badge>
+            <sl-badge variant="neutral">Model: {backendContextModel}</sl-badge>
+            <sl-badge variant="neutral">Instructions: {backendInstructionCount}</sl-badge>
+          </div>
 
-        <sl-details style="margin-top: 10px" summary="Next wiring">
-          <ul>
-            <li>Replace mock grading with SSE stream from backend.</li>
-            <li>Load folder tree and rubric from REST endpoints.</li>
-            <li>Persist markdown with write-through save API.</li>
-          </ul>
-        </sl-details>
+          <sl-textarea
+            style="margin-top: 10px"
+            label="Streaming Grade Output"
+            rows="14"
+            value={gradeStream}
+            readonly
+          ></sl-textarea>
+
+          <p class="footer-note">Grading is a preview with sample feedback.</p>
+        </div>
       {/if}
     </sl-card>
   </div>

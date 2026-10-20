@@ -73,7 +73,7 @@ body {
 }
 
 main {
-  max-width: 1300px;
+  max-width: 1540px;
   margin: 0 auto;
   padding: 20px;
 }
@@ -133,6 +133,7 @@ h3 {
 }
 
 .panel {
+  min-width: 0;
   min-height: 68vh;
 }
 
@@ -148,6 +149,23 @@ h3 {
 
 .panel.is-collapsed {
   min-height: 0;
+  --padding: 8px;
+}
+
+.panel.is-collapsed::part(body) {
+  display: none;
+}
+
+.panel.is-collapsed .panel-header {
+  justify-content: center;
+  margin-bottom: 0;
+  gap: 0;
+}
+
+.panel.is-collapsed .panel-header sl-icon-button::part(base) {
+  width: 30px;
+  height: 30px;
+  padding: 6px;
 }
 
 .panel-header {
@@ -164,20 +182,43 @@ h3 {
   align-items: center;
 }
 
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.panel-tabs [role="tab"] {
+  padding: 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ctp-subtext1);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel-tabs [role="tab"]:hover {
+  background: var(--ctp-surface1);
+}
+
+.panel-tabs [role="tab"][aria-selected="true"] {
+  color: var(--ctp-rosewater);
+  border-bottom-color: currentColor;
+}
+
+.panel-tabs [role="tab"]:focus-visible {
+  outline: 2px solid var(--ctp-rosewater);
+  outline-offset: 2px;
+}
+
 .tree-panel-header {
   align-items: flex-start;
 }
 
 .tree-panel-header > div:first-child {
   min-width: 0;
-}
-
-.tree-panel-header.is-tree-collapsed {
-  justify-content: center;
-}
-
-.tree-panel-header.is-tree-collapsed > div:first-child {
-  display: none;
 }
 
 .tree-panel-header.is-tree-collapsed .tree-toolbar {
@@ -204,12 +245,6 @@ h3 {
   height: 30px;
   border-radius: 4px;
   color: var(--ctp-subtext1);
-}
-
-.tree-panel-header.is-tree-collapsed .tree-toolbar sl-icon-button::part(base) {
-  width: 22px;
-  height: 22px;
-  padding: 3px;
 }
 
 .tree-toolbar sl-icon-button::part(base):hover {
@@ -425,7 +460,7 @@ sl-button[variant="primary"]::part(base) {
   font-size: 0.9rem;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .grid {
     grid-template-columns: 1fr;
   }
@@ -436,5 +471,19 @@ sl-button[variant="primary"]::part(base) {
 
   .panel {
     min-height: auto;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .panel-header-controls {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .panel-header-controls sl-badge {
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 }

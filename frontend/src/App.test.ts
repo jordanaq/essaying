@@ -33,6 +33,10 @@ function createApiAwareFetchMock(apiResponses: ApiResponse[]) {
   return vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
 
+    if (url.includes("/workspace/context")) {
+      return Promise.resolve(responseFromApiResponse(jsonResponse(404, { error: { message: "Context does not exist." } })));
+    }
+
     if (url.startsWith("/api/")) {
       const response = apiResponses[nextApiResponseIndex] ?? jsonResponse(500, { message: "Unexpected API call" });
       nextApiResponseIndex += 1;
