@@ -13,7 +13,8 @@ where
 
 import Control.Exception (IOException, try)
 import Control.Monad (foldM)
-import Data.Aeson (eitherDecodeStrict')
+import Data.Aeson.Parser (eitherDecodeStrictWith, jsonNoDup')
+import Data.Aeson.Types (ifromJSON)
 import Data.ByteString qualified as BS
 import Data.Text qualified as Text
 import Essaying.Context (emptyEffectiveContext, applyLayer)
@@ -127,8 +128,8 @@ loadContextLayer (WorkspaceRoot root) relativePath =
           case contents of
             Left err -> pure (Left (ContextLayerIoError relativePath (ioeGetErrorString err)))
             Right bytes ->
-              case eitherDecodeStrict' bytes of
-                Left message -> pure (Left (ContextLayerJsonError relativePath message))
+              case eitherDecodeStrictWith jsonNoDup' ifromJSON bytes of
+                Left (_, message) -> pure (Left (ContextLayerJsonError relativePath message))
                 Right layer -> do
                   debug 3 $ "Loaded context file=" <> show relativePath
                   pure (Right (Just layer))

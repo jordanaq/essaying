@@ -429,6 +429,18 @@ loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
           }
   assertEqual "valid context file decodes" (Right (Just expected)) loaded
 
+  let duplicateKeys =
+        [ ("top-level key", "{\"title\":null,\"title\":null}")
+        , ("escaped top-level key", "{\"title\":null,\"\\u0074itle\":null}")
+        , ("nested operation key", "{\"model\":{\"tag\":\"ClearScalar\",\"tag\":\"ClearScalar\"}}")
+        ]
+  mapM_ (\(label, source) -> do
+    writeFile contextPath source
+    result <- loadContextLayer workspace relativePath
+    case result of
+      Left (ContextLayerJsonError _ _) -> pure ()
+      other -> assertFailure ("expected duplicate " <> label <> " to fail, got " <> show other)) duplicateKeys
+
   writeFile contextPath "{invalid"
   invalid <- loadContextLayer workspace relativePath
   case invalid of
