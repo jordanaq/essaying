@@ -13,15 +13,11 @@ import Control.Exception (IOException, try)
 import Control.Monad (foldM)
 import Data.Aeson (encode)
 import Data.ByteString.Lazy qualified as BL
-import Data.Aeson.Parser (eitherDecodeStrictWith, jsonNoDup')
-import Data.Aeson.Types (ifromJSON)
-import Data.Attoparsec.ByteString (endOfInput, skipWhile)
 import Data.ByteString qualified as BS
 import Data.Text qualified as Text
-import Data.Word (Word8)
 import Essaying.Context (emptyEffectiveContext, applyLayer)
 import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePath)
-import Essaying.Types.Context (ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
+import Essaying.Types.Context (decodeContextLayer, ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Utils (debug_)
 import System.Directory (doesFileExist, pathIsSymbolicLink, removeFile)
@@ -112,10 +108,10 @@ loadContextLayer (WorkspaceRoot root) relativePath =
           case contents of
             Left err -> pure (Left (ContextLayerIoError relativePath (ioeGetErrorString err)))
             Right bytes ->
-              case eitherDecodeStrictWith (jsonNoDup' <* skipWhile isJsonSpace <* endOfInput) ifromJSON bytes of
-                Left (_, message) -> do
-                  debug 3 $ "Invalid context file=" <> show relativePath <> ": " <> message
-                  pure (Left (ContextLayerJsonError relativePath message))
+              case decodeContextLayer bytes of
+                Left diagnostic -> do
+                  debug 3 $ "Invalid context file=" <> show relativePath
+                  pure (Left (ContextLayerJsonError relativePath diagnostic))
                 Right layer -> do
                   debug 3 $ "Loaded context file=" <> show relativePath
                   pure (Right (Just layer))
@@ -154,11 +150,6 @@ checkEntries root (fullPath : remaining) = do
       | isDoesNotExistError err -> pure (Left (ContextLayerInvalidPath label))
       | otherwise -> pure (Left (ContextLayerIoError label (ioeGetErrorString err)))
 
--- | JSON permits only these four whitespace bytes after the single document.
--- The low-level duplicate-checking parser alone accepts trailing input.
-isJsonSpace :: Word8 -> Bool
-isJsonSpace byte = byte == 32 || byte == 10 || byte == 13 || byte == 9
-
 -- | Write a validated layer below a trusted workspace root. Parent directories
 -- must already exist; symbolic links are rejected just as they are on reads.
 saveContextLayer :: WorkspaceRoot -> FilePath -> ContextLayer -> IO (Either ContextLayerError ())
@@ -168,8 +159,8 @@ saveContextLayer workspace path layer = do
     Left err -> pure (Left err)
     Right (fullPath, _) -> do
       let bytes = BL.toStrict (encode layer)
-      case eitherDecodeStrictWith (jsonNoDup' <* skipWhile isJsonSpace <* endOfInput) ifromJSON bytes of
-        Left (_, message) -> pure (Left (ContextLayerJsonError path message))
+      case decodeContextLayer bytes of
+        Left diagnostic -> pure (Left (ContextLayerJsonError path diagnostic))
         Right (_ :: ContextLayer) -> do
           result <- try (BS.writeFile fullPath bytes) :: IO (Either IOException ())
           pure $ case result of

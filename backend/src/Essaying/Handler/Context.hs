@@ -12,17 +12,16 @@ where
 
 import Essaying.API.V1 (ContextApi)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (encode, object, (.=))
-import Data.Text (Text)
+import Essaying.Handler.ContextError (contextError, contextValidationError)
 import Essaying.Persistence.Context (saveContextLayer, deleteContextLayer, loadContextLayer, loadEffectiveContext)
 import Essaying.Types.Context
-  ( ContextLayer, EffectiveContext, ContextLayerError (..), EffectiveContextError (..)
+  ( ContextWriteRequest (..), parseContextLayer, ContextLayer, EffectiveContext, ContextLayerError (..), EffectiveContextError (..)
   , CreateContextRequest (..), UpdateContextRequest (..), DeleteContextRequest (..)
   )
 import Essaying.Types.Storage (WorkspaceRoot)
 import Servant
-  ( Handler, Server, (:<|>) (..), NoContent (NoContent), ServerError (..)
-  , throwError, err400, err403, err404, err409, err422, err500
+  ( Handler, Server, (:<|>) (..), NoContent (NoContent)
+  , err400, err403, err404, err409, err500
   )
 
 -- | Resolve the trusted workspace root for each request.
@@ -30,8 +29,8 @@ contextHandler :: Handler WorkspaceRoot -> Server ContextApi
 contextHandler resolveRoot =
   (\path -> withRoot (\root -> effectiveContextHandler root path))
     :<|> (\path -> withRoot (\root -> loadContextHandler root path))
-    :<|> (\req -> withRoot (\root -> createContextHandler root req))
-    :<|> (\req -> withRoot (\root -> updateContextHandler root req))
+    :<|> (\req -> withRoot (\root -> createRequest root req))
+    :<|> (\req -> withRoot (\root -> updateRequest root req))
     :<|> (\req -> withRoot (\root -> deleteContextHandler root req))
   where
     withRoot :: (WorkspaceRoot -> Handler a) -> Handler a
@@ -54,7 +53,7 @@ effectiveContextHandler root path = do
     Left (EffectiveContextInvalidPath invalid) -> contextError err400 "INVALID_ESSAY_PATH" invalid "Use a workspace-relative markdown essay path."
     Left (EffectiveContextEssayNotFound missing) -> contextError err404 "ESSAY_NOT_FOUND" missing "Essay does not exist."
     Left (EffectiveContextSymbolicLink linked) -> contextError err403 "CONTEXT_SYMBOLIC_LINK" linked "Context paths must not pass through symbolic links."
-    Left (EffectiveContextJsonError invalid message) -> contextError err422 "INVALID_CONTEXT" invalid message
+    Left (EffectiveContextJsonError invalid diagnostic) -> contextValidationError invalid Nothing diagnostic
     Left (EffectiveContextIoError invalid _) -> contextError err500 "CONTEXT_IO_ERROR" invalid "Unable to resolve essay context."
 
 -- The caller resolves this trusted root from the selected account. Request
@@ -99,18 +98,19 @@ handleContextError :: ContextLayerError -> Handler a
 handleContextError err = case err of
   ContextLayerInvalidPath path -> contextError err400 "INVALID_CONTEXT_PATH" path "Use an existing directory and a workspace-relative context.json path."
   ContextLayerSymbolicLink path -> contextError err403 "CONTEXT_SYMBOLIC_LINK" path "Context paths must not pass through symbolic links."
-  ContextLayerJsonError path message -> contextError err422 "INVALID_CONTEXT" path message
+  ContextLayerJsonError path diagnostic -> contextValidationError path Nothing diagnostic
   -- Do not send operating-system error strings, which may contain absolute paths.
   ContextLayerIoError path _ -> contextError err500 "CONTEXT_IO_ERROR" path "Unable to access the context file."
 
-contextError :: ServerError -> Text -> FilePath -> String -> Handler a
-contextError status code path message = throwError status
-  { errBody = encode $ object
-      [ "error" .= object
-          [ "code" .= code
-          , "message" .= message
-          , "details" .= object ["path" .= path]
-          ]
-      ]
-  , errHeaders = [("Content-Type", "application/json")]
-  }
+-- Invalid layers are carried across the envelope decoding boundary as JSON.
+createRequest :: WorkspaceRoot -> ContextWriteRequest -> Handler ContextLayer
+createRequest root (ContextWriteRequest path value) =
+  case parseContextLayer value of
+    Left diagnostic -> contextValidationError path (Just "contextLayer") diagnostic
+    Right layer -> createContextHandler root (CreateContextRequest path layer)
+
+updateRequest :: WorkspaceRoot -> ContextWriteRequest -> Handler ContextLayer
+updateRequest root (ContextWriteRequest path value) =
+  case parseContextLayer value of
+    Left diagnostic -> contextValidationError path (Just "contextLayer") diagnostic
+    Right layer -> updateContextHandler root (UpdateContextRequest path layer)

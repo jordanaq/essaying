@@ -14,6 +14,11 @@ module Essaying.Types.Context
   , RubricOverride (..)
   , RubricCriterion (..)
     -- * Loading errors
+  , ContextDiagnostic (..)
+  , contextDiagnostic
+  , decodeContextLayer
+  , parseContextLayer
+  , ContextWriteRequest (..)
   , ContextLayerError (..)
   , EffectiveContextError (..)
     -- * Context mutation requests (workspace root is supplied by the server)
@@ -27,18 +32,26 @@ import GHC.Generics (Generic)
 import Data.Text (Text)
 import Data.Aeson
   ( FromJSON (..)
-  , ToJSON
+  , ToJSON (..)
+  , encode, object, (.=), (.:), withObject
   , defaultOptions
   , genericParseJSON
   , rejectUnknownFields
   )
 import Data.Aeson.KeyMap qualified as KeyMap
-import Data.Aeson.Types (Parser, Value (..))
+import Data.Aeson.Types (Parser, Value (..), JSONPath, JSONPathElement (..), (<?>), iparseEither, ifromJSON)
+import Data.Char (isAscii, isAlphaNum, isLetter)
+import Data.List (findIndex)
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BL
+import Data.Text.Encoding qualified as Encoding
+import Data.Aeson.Parser (eitherDecodeStrictWith, jsonNoDup')
+import Data.Attoparsec.ByteString (endOfInput, skipWhile)
 import Data.Aeson.Key (Key)
+import Data.Aeson.Key qualified as Key
 import Data.Text qualified as Text
 import Data.Map.Strict qualified as Map
 import Data.Map.Strict (Map)
-import Data.Set qualified as Set
 
 
 -- | Context available to an essay after all ancestor layers have been applied.
@@ -108,7 +121,7 @@ data ContextLayerError
   = ContextLayerInvalidPath FilePath
   | ContextLayerSymbolicLink FilePath
   | ContextLayerIoError FilePath String
-  | ContextLayerJsonError FilePath String
+  | ContextLayerJsonError FilePath ContextDiagnostic
   deriving stock (Eq, Show)
 
 -- | Reason context could not be resolved for an essay.
@@ -118,7 +131,7 @@ data EffectiveContextError
   | EffectiveContextEssayNotFound FilePath
   | EffectiveContextSymbolicLink FilePath
   | EffectiveContextIoError FilePath String
-  | EffectiveContextJsonError FilePath String
+  | EffectiveContextJsonError FilePath ContextDiagnostic
   | EffectiveContextLayerError ContextLayerError
   deriving stock (Eq, Show)
 
@@ -140,16 +153,21 @@ data DeleteContextRequest = DeleteContextRequest
   { path :: FilePath
   }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
+
+instance FromJSON DeleteContextRequest where
+  parseJSON value = do
+    checkShape "DeleteContextRequest" ["path"] value
+    withObject "DeleteContextRequest" (\o -> DeleteContextRequest <$> o .: "path") value
 
 instance FromJSON a => FromJSON (ScalarOverride a) where
   parseJSON value = do
     case value of
-      Object object
-        | KeyMap.lookup "tag" object == Just (String "ClearScalar")
+      Object members
+        | KeyMap.lookup "tag" members == Just (String "ClearScalar")
         -> checkShape "ScalarOverride" ["tag"] value
-      Object object
-        | KeyMap.lookup "tag" object == Just (String "SetScalar")
+      Object members
+        | KeyMap.lookup "tag" members == Just (String "SetScalar")
         -> checkShape "ScalarOverride" ["tag", "contents"] value
       _ -> fail "Invalid ScalarOverride tag"
 
@@ -172,21 +190,23 @@ instance FromJSON RubricOverride where
           ReplaceRubric m -> m
 
     if any (Text.null . Text.strip) (Map.keys criteria)
-      then fail "Rubric contains empty criterion keys"
+      then fail "Rubric criterion names must not be blank." <?> Key "contents"
       else pure override
 
 instance FromJSON RubricCriterion where
   parseJSON value = do
+    rejectUnknown ["weight", "description"] value
     criterion <- genericParseJSON defaultOptions { rejectUnknownFields = True } value
     case criterion of
       RubricCriterion { weight = w } | w < 0 || isNaN w || isInfinite w ->
-        fail "Rubric criterion contains invalid weight"
+        fail "Rubric weight must be a finite, nonnegative number." <?> Key "weight"
       RubricCriterion { description = Just desc } | Text.null (Text.strip desc) ->
-        fail "Rubric criterion contains empty description"
+        fail "Rubric description must not be blank." <?> Key "description"
       _ -> pure criterion
 
 instance FromJSON ContextLayer where
   parseJSON value = do
+    rejectUnknown ["title", "audience", "model", "tags", "instructions", "grading_directions", "rubric"] value
     layer <- genericParseJSON defaultOptions { rejectUnknownFields = True } value
     let ContextLayer
           { title = titleOverride
@@ -213,16 +233,24 @@ instance FromJSON ContextLayer where
 -- | Require exactly the listed keys in a tagged operation object.
 -- Non-object values are left to the operation's decoder.
 checkShape :: String -> [Key] -> Value -> Parser ()
-checkShape fieldName requiredKeys (Object object)
-  | Set.fromList (KeyMap.keys object) /= Set.fromList requiredKeys =
-      fail (fieldName <> " has missing or unexpected fields")
-  | otherwise = pure ()
+checkShape _ requiredKeys value@(Object members) = do
+  rejectUnknown requiredKeys value
+  case filter (\key -> not (KeyMap.member key members)) requiredKeys of
+    missing : _ -> fail "Required context field is missing." <?> Key missing
+    [] -> pure ()
 checkShape _ _ _ = pure ()
+
+rejectUnknown :: [Key] -> Value -> Parser ()
+rejectUnknown allowed (Object members) =
+  case filter (`notElem` allowed) (KeyMap.keys members) of
+    unknown : _ -> fail "Unknown context field." <?> Key unknown
+    [] -> pure ()
+rejectUnknown _ _ = pure ()
 
 -- | Reject a blank supplied scalar while allowing inheritance and clearing.
 validateScalar :: String -> Maybe (ScalarOverride Text) -> Parser ()
 validateScalar field (Just (SetScalar text))
-  | Text.null (Text.strip text) = fail (field <> " must not be blank")
+  | Text.null (Text.strip text) = fail "Context values must not be blank." <?> Key "contents" <?> Key (fromStringKey field)
 validateScalar _ _ = pure ()
 
 -- | Check every supplied item for either list operation.
@@ -233,6 +261,71 @@ validateList _ Nothing = pure ()
 
 -- | Reject whitespace-only list items without changing valid text.
 validateItems :: String -> [Text] -> Parser ()
-validateItems field items
-  | any (Text.null . Text.strip) items = fail (field <> " must not contain blank items")
-  | otherwise = pure ()
+validateItems field items =
+  case findIndex (Text.null . Text.strip) items of
+    Just index -> fail "Context list items must not be blank." <?> Index index <?> Key "contents" <?> Key (fromStringKey field)
+    Nothing -> pure ()
+
+-- | A public diagnostic contains no decoder excerpts or supplied values.
+data ContextDiagnostic = ContextDiagnostic
+  { diagnosticField :: Maybe Text
+  , diagnosticMessage :: Text
+  }
+  deriving stock (Eq, Show)
+
+fromStringKey :: String -> Key
+fromStringKey = Key.fromString
+
+-- | Preserve the decoder path, allowing only application-owned messages.
+contextDiagnostic :: (JSONPath, String) -> ContextDiagnostic
+contextDiagnostic (location, message) = ContextDiagnostic
+  (if null location then Nothing else Just (renderField location))
+  (if message `elem` safeMessages then Text.pack message else "Context field has an invalid type, shape, or value.")
+  where
+    safeMessages =
+      [ "Required context field is missing."
+      , "Unknown context field."
+      , "Rubric weight must be a finite, nonnegative number."
+      , "Rubric description must not be blank."
+      , "Rubric criterion names must not be blank."
+      , "Context values must not be blank."
+      , "Context list items must not be blank."
+      ]
+
+renderField :: JSONPath -> Text
+renderField = foldl step ""
+  where
+    step prefix (Index index) = prefix <> "[" <> Text.pack (show index) <> "]"
+    step prefix (Key key)
+      | identifier name = prefix <> (if Text.null prefix then "" else ".") <> name
+      | otherwise = prefix <> "[" <> Encoding.decodeUtf8 (BL.toStrict (encode name)) <> "]"
+      where name = Key.toText key
+    identifier name = case Text.uncons name of
+      Just (first, rest) -> isAscii first && (isLetter first || first == '_')
+        && Text.all (\c -> isAscii c && (isAlphaNum c || c == '_')) rest
+      Nothing -> False
+
+parseContextLayer :: Value -> Either ContextDiagnostic ContextLayer
+parseContextLayer = either (Left . contextDiagnostic) Right . iparseEither parseJSON
+
+-- | Decode once with duplicate-key and trailing-input rejection. Syntax errors
+-- have no reliable field/coordinate; never forward raw parser messages.
+decodeContextLayer :: BS.ByteString -> Either ContextDiagnostic ContextLayer
+decodeContextLayer bytes =
+  case eitherDecodeStrictWith (jsonNoDup' <* skipWhile isSpaceByte <* endOfInput) ifromJSON bytes of
+    Left _ -> Left (ContextDiagnostic Nothing "Context must contain one valid JSON document with unique object keys.")
+    Right value -> parseContextLayer value
+  where isSpaceByte byte = byte == 32 || byte == 10 || byte == 13 || byte == 9
+
+-- | Decode the envelope at the HTTP boundary; validate the layer in the handler
+-- so a syntactically valid invalid layer returns 422, not Servant's default 400.
+data ContextWriteRequest = ContextWriteRequest FilePath Value
+  deriving stock (Eq, Show)
+
+instance FromJSON ContextWriteRequest where
+  parseJSON value = do
+    checkShape "ContextWriteRequest" ["path", "contextLayer"] value
+    withObject "ContextWriteRequest" (\o -> ContextWriteRequest <$> o .: "path" <*> o .: "contextLayer") value
+
+instance ToJSON ContextWriteRequest where
+  toJSON (ContextWriteRequest path layer) = object ["path" .= path, "contextLayer" .= layer]

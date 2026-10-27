@@ -7,10 +7,14 @@ where
 
 import Essaying.API.V1 (ContextApi)
 import Control.Monad.IO.Class (liftIO)
+import Control.Exception (IOException, try)
+import Essaying.Handler.ContextError (contextError)
+import Essaying.Persistence.Account (readAccountProfile)
 import Data.Text (Text)
 import Essaying.Handler.Context (contextHandler)
 import Essaying.Persistence.Workspace
-  ( createWorkspaceDirectory
+  ( isSafeSegment
+  , createWorkspaceDirectory
   , createWorkspaceEssay
   , deleteWorkspaceDirectory
   , deleteWorkspaceEssay
@@ -33,7 +37,7 @@ import Essaying.Types.Workspace
   , WorkspaceDeleteResult (..)
   )
 import Essaying.Types.Storage (WorkspaceRoot)
-import Servant (Server, Handler, NoContent (NoContent), err400, err403, err404, err409, throwError, (:<|>) (..))
+import Servant (Server, Handler, NoContent (NoContent), err400, err403, err404, err409, err500, throwError, (:<|>) (..))
 
 workspaceHandler ::
   Text ->
@@ -49,7 +53,7 @@ workspaceHandler accountIdText =
     :<|> createWorkspaceEssayHandler accountIdText
     :<|> deleteWorkspaceDirectoryHandler accountIdText
     :<|> createWorkspaceDirectoryHandler accountIdText
-    :<|> contextHandler (resolveWorkspaceRoot accountIdText)
+    :<|> contextHandler (resolveContextWorkspaceRoot accountIdText)
 
 essayRoutes :: Text -> [Text] -> Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)
 essayRoutes accountIdText essayPath =
@@ -130,3 +134,21 @@ createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParent
     WorkspaceEssayCreated content -> pure content
     WorkspaceEssayAlreadyExists -> throwError err409
     WorkspaceEssayCreationFailed _ -> throwError err400
+
+-- Context endpoints require a real selected account before inspecting its files.
+resolveContextWorkspaceRoot :: Text -> Handler WorkspaceRoot
+resolveContextWorkspaceRoot accountIdText
+  | not (isSafeSegment accountIdText) =
+      contextError err400 "INVALID_ACCOUNT_ID" "" "Select a valid account."
+  | otherwise = do
+      result <- liftIO (try resolve :: IO (Either IOException (Maybe WorkspaceRoot)))
+      case result of
+        Left _ -> contextError err500 "CONTEXT_IO_ERROR" "" "Unable to access the selected account."
+        Right Nothing -> contextError err404 "ACCOUNT_NOT_FOUND" "" "Select an existing account."
+        Right (Just root) -> pure root
+  where
+    resolve = do
+      cacheRoot <- resolveCacheRoot
+      let root = accountRoot (usersRoot cacheRoot) (AccountId accountIdText)
+      profile <- readAccountProfile root
+      pure (workspaceRoot root <$ profile)

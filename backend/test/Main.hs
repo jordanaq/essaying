@@ -5,12 +5,13 @@
 
 module Main where
 
+import ContextErrors qualified
 import ContextHandlers qualified
 
 import ContextAcceptance qualified
 import Control.Exception (finally)
 import Control.Monad (when)
-import Data.Aeson (decode, encode)
+import Data.Aeson (decode, encode, toJSON)
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
 import Data.Proxy (Proxy (..))
@@ -40,7 +41,7 @@ import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..), CreateAccountRequest (..), UpdateAccountRequest)
 import Essaying.Types.Context
-  ( ContextLayer, CreateContextRequest (..), UpdateContextRequest (..), DeleteContextRequest (..)
+  ( ContextWriteRequest (..), ContextLayer, DeleteContextRequest (..)
   , ContextLayerError (..)
   , EffectiveContext (..)
   , EffectiveContextError (..)
@@ -95,8 +96,8 @@ type WorkspaceClientRoutes =
     :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
     :<|> ((FilePath -> ClientM EffectiveContext)
       :<|> (FilePath -> ClientM ContextLayer)
-      :<|> (CreateContextRequest -> ClientM ContextLayer)
-      :<|> (UpdateContextRequest -> ClientM ContextLayer)
+      :<|> (ContextWriteRequest -> ClientM ContextLayer)
+      :<|> (ContextWriteRequest -> ClientM ContextLayer)
       :<|> (DeleteContextRequest -> ClientM NoContent))
 
 accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
@@ -109,7 +110,8 @@ main = do
 
 tests :: Test
 tests = TestList
-  [ ContextHandlers.tests
+  [ ContextErrors.tests
+  , ContextHandlers.tests
   , TestLabel "context acceptance" ContextAcceptance.tests
   , TestLabel "health response value" healthResponseValue
   , TestLabel "health response json" healthResponseJson
@@ -739,12 +741,12 @@ contextApiMutations = TestCase $
         case account of
           Left err -> assertFailure (show err)
           Right _ -> pure ()
-        created <- runClientM (createLayer (CreateContextRequest "context.json" layer)) env
+        created <- runClientM (createLayer (ContextWriteRequest "context.json" (toJSON layer))) env
         case created of
           Left err -> assertFailure (show err)
           Right actual -> assertEqual "create returns layer" layer actual
         assertEqual "create persists to selected account" (Right (Just layer)) =<< loadContextLayer root "context.json"
-        saved <- runClientM (updateLayer (UpdateContextRequest "context.json" updated)) env
+        saved <- runClientM (updateLayer (ContextWriteRequest "context.json" (toJSON updated))) env
         case saved of
           Left err -> assertFailure (show err)
           Right actual -> assertEqual "update returns layer" updated actual

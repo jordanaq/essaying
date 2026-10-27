@@ -8,7 +8,7 @@ module Essaying.API.V1 (
 where
 
 import Data.Text (Text)
-import Essaying.Types.Context (ContextLayer, EffectiveContext, CreateContextRequest, UpdateContextRequest, DeleteContextRequest)
+import Essaying.Types.Context (ContextLayer, EffectiveContext, ContextWriteRequest, DeleteContextRequest)
 import Essaying.Types.Health (HealthResponse, ReadyResponse)
 import Essaying.Types.Account (AccountProfile, CreateAccountRequest, UpdateAccountRequest)
 import Essaying.Types.Workspace (
@@ -55,6 +55,6 @@ type Api =
 type ContextApi =
     "effective" :> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] EffectiveContext
         :<|> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] ContextLayer
-        :<|> ReqBody '[JSON] CreateContextRequest :> PostCreated '[JSON] ContextLayer
-        :<|> ReqBody '[JSON] UpdateContextRequest :> Put '[JSON] ContextLayer
+        :<|> ReqBody '[JSON] ContextWriteRequest :> PostCreated '[JSON] ContextLayer
+        :<|> ReqBody '[JSON] ContextWriteRequest :> Put '[JSON] ContextLayer
         :<|> ReqBody '[JSON] DeleteContextRequest :> DeleteNoContent

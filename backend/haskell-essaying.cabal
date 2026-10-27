@@ -20,6 +20,7 @@ executable haskell-essaying
     , Essaying.Context
     , Essaying.Handler.Account
     , Essaying.Handler.Context
+    , Essaying.Handler.ContextError
     , Essaying.Handler.Health
     , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
@@ -42,6 +43,7 @@ executable haskell-essaying
     , containers >=0.6
     , directory >=1.3
     , filepath >=1.4
+    , http-types >=0.12
     , servant >=0.20
     , servant-server >=0.20
     , text >=2.0
@@ -58,11 +60,13 @@ test-suite haskell-essaying-test
   main-is:          Main.hs
   other-modules:
       ContextAcceptance
+    , ContextErrors
     , ContextHandlers
     , Essaying.Context
     , Essaying.API.V1
     , Essaying.Handler.Account
     , Essaying.Handler.Context
+    , Essaying.Handler.ContextError
     , Essaying.Handler.Health
     , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
@@ -86,6 +90,7 @@ test-suite haskell-essaying-test
     , directory >=1.3
     , filepath >=1.4
     , HUnit >=1.6
+    , http-types >=0.12
     , http-client >=0.7
     , servant-client >=0.20
     , servant-server >=0.20
