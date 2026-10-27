@@ -31,6 +31,9 @@ test("switching to an empty essay clears the editor and saves empty markdown", a
   const editor = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
   await expect(editor).toHaveValue("mrroww");
   await page.locator('.tree-item-name[title="meow in"]').click();
+  const folder = page.locator('sl-tree-item[data-path=\'["meow","meow in"]\']');
+  await folder.press("ArrowRight");
+  await expect(folder).toHaveAttribute("aria-expanded", "true");
   await page.locator('.tree-item-name[title="essay.md"]').click();
   await expect(page.getByText("Currently editing meow/meow in/essay.md.", { exact: true })).toBeVisible();
   await expect(editor).toHaveValue("");
