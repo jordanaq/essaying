@@ -29,6 +29,12 @@ test("edit folder context and preview inheritance through the live API", async (
     await expect(panel.getByRole("table")).toContainText("Support claims with sources.");
     await page.reload();
     await expect(panel.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Causes of change");
+    // Update saved settings outside the UI, then refresh only the effective preview.
+    expect((await request.put(`${base}/context`, { data: { path: "context.json", contextLayer: {
+      audience: { tag: "SetScalar", contents: "Researchers" }, instructions: { tag: "AppendList", contents: ["Use sources."] }
+    } } })).ok()).toBeTruthy();
+    await panel.getByRole("button", { name: "Refresh preview" }).click();
+    await expect(panel.getByText("Researchers", { exact: true })).toBeVisible();
     await page.screenshot({ path: "/tmp/essaying-context-desktop.png", fullPage: true });
     await panel.getByLabel("Title behavior").selectOption("ClearScalar");
     await panel.getByRole("button", { name: "Save context" }).click();
@@ -36,7 +42,7 @@ test("edit folder context and preview inheritance through the live API", async (
     await panel.getByRole("button", { name: "Remove layer" }).click();
     await panel.getByRole("button", { name: "Confirm removal" }).click();
     await expect(panel.getByText("Layer removed. Parent settings now apply.")).toBeVisible();
-    await expect(panel.getByText("Students", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Researchers", { exact: true })).toBeVisible();
     await expect(panel.getByText("No criteria set.", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(panel.getByLabel("Title behavior")).toBeVisible();

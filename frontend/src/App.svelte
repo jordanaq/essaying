@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ContextPanel from "./ContextPanel.svelte";
+  import { createContextPreview, contextSelection } from "./context-preview";
   import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
   import "@shoelace-style/shoelace/dist/components/badge/badge.js";
   import "@shoelace-style/shoelace/dist/components/button/button.js";
@@ -80,6 +81,14 @@
   let newAccountName = "";
   let newAccountModel = "llama3.1:8b";
   let activeAccountId: string | null = null;
+  const contextPreview = createContextPreview();
+  $: contextReady = selectedWorkspaceEssay !== null
+    && $contextPreview.selection === contextSelection(activeAccountId, selectedWorkspaceEssay.path)
+    && $contextPreview.status === "ready";
+  $: contextUnavailable = !selectedWorkspaceEssay ? "Select an essay to grade."
+    : $contextPreview.selection !== contextSelection(activeAccountId, selectedWorkspaceEssay.path) || $contextPreview.status === "loading" || $contextPreview.status === "idle"
+      ? "Checking writing context…"
+      : "Grading is unavailable until writing context resolves. Retry in the Context panel.";
   let gradeStream = "";
   let status = "Idle";
   let backendMessage = "Not fetched";
@@ -260,6 +269,7 @@
   }
 
   async function loadWorkspaceEssay(accountId: string, essayPath: string[], shouldLog = true) {
+    contextPreview.cancel();
     const encodedPath = essayPath.map((segment) => encodeURIComponent(segment)).join("/");
     if (shouldLog) {
       uiLog("info", "Loading essay", { accountId, essayPath });
@@ -544,6 +554,7 @@
   }
 
   function mockGrade() {
+    if (!contextReady) return;
     status = "Streaming grading preview";
     const chunks = [
       "Clarity: strong structure. ",
@@ -1014,8 +1025,9 @@
             {savingDraft ? "Saving..." : "Save Draft"}
           </sl-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="default" on:click={mockGrade}>Grade (mock stream)</sl-button>
+          <sl-button variant="default" on:click={mockGrade} disabled={!contextReady} aria-describedby={contextReady ? undefined : "grade-context-status"}>Grade (mock stream)</sl-button>
         </div>
+        {#if !contextReady}<p id="grade-context-status" class="footer-note" role="status">{contextUnavailable}</p>{/if}
         {#if selectedWorkspaceEssay}
           <p class="footer-note">Currently editing {pathToLabel(selectedWorkspaceEssay.path)}.</p>
         {:else}
@@ -1050,10 +1062,11 @@
         {/if}
       </div>
 
-      {#if panelState.feedback}
+      <div hidden={!panelState.feedback}>
         <div id="context-tabpanel" role="tabpanel" aria-labelledby="context-tab" tabindex="0" hidden={activeFeedbackTab !== "context"}>
           {#key activeAccountId}
             <ContextPanel
+              preview={contextPreview}
               accountId={activeAccount.accountId.unAccountId}
               directoryPath={selectedWorkspaceDirectoryPath}
               essayPath={selectedWorkspaceEssay?.path ?? null}
@@ -1079,7 +1092,7 @@
 
           <p class="footer-note">Grading is a preview with sample feedback.</p>
         </div>
-      {/if}
+      </div>
     </sl-card>
   </div>
   {/if}

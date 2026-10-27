@@ -37,6 +37,50 @@ async function changeMode(label: string, value: string) {
 describe("Writing context", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("refreshes saved effective context without discarding unsaved layer edits", async () => {
+    const fetchMock = mockApi({ title: { tag: "SetScalar", contents: "Saved title" } });
+    render(ContextPanel, props);
+    await screen.findByText("History Essays");
+    await fireEvent.input(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved title" } });
+    fetchMock.mockImplementation(async () => json({ ...effective, title: "Changed outside the app" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Refresh preview" }));
+    await screen.findByText("Changed outside the app");
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsaved title");
+    expect(screen.getByText(/Unsaved changes/)).toBeInTheDocument();
+  });
+
+  it("clears a successful preview on failure and recovers through retry", async () => {
+    const fetchMock = mockApi();
+    render(ContextPanel, props);
+    await screen.findByText("History Essays");
+    fetchMock.mockImplementation(async () => json({ error: { message: "Invalid ancestor context." } }, 422));
+    await fireEvent.click(screen.getByRole("button", { name: "Refresh preview" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid ancestor context.");
+    expect(screen.queryByText("History Essays")).not.toBeInTheDocument();
+    fetchMock.mockImplementation(async () => json(effective));
+    await fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    await screen.findByText("History Essays");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores an old account's effective response after switching accounts", async () => {
+    let resolveOld!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/effective")) return Promise.resolve(json({}));
+      if (url.includes("alice")) return new Promise<Response>((resolve) => { resolveOld = resolve; });
+      return Promise.resolve(json({ ...effective, title: "Bob's context" }));
+    }));
+    const { rerender } = render(ContextPanel, { ...props, accountId: "alice" });
+    await waitFor(() => expect(resolveOld).toBeDefined());
+    await rerender({ ...props, accountId: "bob" });
+    await screen.findByText("Bob's context");
+    resolveOld(json({ ...effective, title: "Alice's context" }));
+    await waitFor(() => expect(screen.queryByText("Resolving context…")).not.toBeInTheDocument());
+    expect(screen.queryByText("Alice's context")).not.toBeInTheDocument();
+    expect(screen.getByText("Bob's context")).toBeInTheDocument();
+  });
+
   it("loads a missing folder layer as inherited and renders resolved essay context", async () => {
     const fetchMock = mockApi();
     render(ContextPanel, props);

@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { contextRequest, ContextApiError, type ContextLayer, type EffectiveContext } from "./context-api";
+  import { contextRequest, ContextApiError, type ContextLayer } from "./context-api";
+  import { createContextPreview } from "./context-preview";
 
+  export let preview = createContextPreview();
   export let accountId: string;
   export let directoryPath: string[] = [];
   export let essayPath: string[] | null = null;
@@ -25,11 +27,10 @@
   let notice = "";
   let dirty = false;
   let confirmDelete = false;
-  let effective: EffectiveContext | null = null;
-  let effectiveError = "";
-  let effectiveLoading = false;
+  $: effective = $preview.context;
+  $: effectiveError = $preview.error;
+  $: effectiveLoading = $preview.status === "loading";
   let layerController: AbortController | undefined;
-  let effectiveController: AbortController | undefined;
   let mutationController: AbortController | undefined;
 
   $: selection = JSON.stringify([accountId, directoryPath]);
@@ -40,11 +41,11 @@
   $: scopes = Array.from({ length: directoryPath.length + 1 }, (_, index) => directoryPath.slice(0, index).join("/"));
   $: layerPath = scope ? `${scope}/context.json` : "context.json";
   $: void loadLayer(accountId, layerPath);
-  $: void loadEffective(accountId, essayPath?.join("/") ?? null);
+  $: void preview.load(accountId, essayPath);
 
   onDestroy(() => {
     layerController?.abort();
-    effectiveController?.abort();
+    preview.cancel();
     mutationController?.abort();
   });
 
@@ -119,24 +120,6 @@
     }
   }
 
-  async function loadEffective(account: string, path: string | null) {
-    effectiveController?.abort();
-    const controller = new AbortController();
-    effectiveController = controller;
-    effective = null;
-    effectiveError = "";
-    effectiveLoading = path !== null;
-    if (!path) return;
-    try {
-      const result = await contextRequest<EffectiveContext>(account, path, { effective: true, signal: controller.signal });
-      if (!controller.signal.aborted) effective = result;
-    } catch (err) {
-      if (!controller.signal.aborted) effectiveError = err instanceof Error ? err.message : String(err);
-    } finally {
-      if (!controller.signal.aborted) effectiveLoading = false;
-    }
-  }
-
   function buildLayer(): ContextLayer {
     const layer: ContextLayer = {};
     for (const field of fields) {
@@ -168,6 +151,7 @@
     error = notice = "";
     try {
       const layer = remove ? undefined : buildLayer();
+      preview.cancel();
       const saved = await contextRequest<ContextLayer>(accountId, layerPath, {
         method: remove ? "DELETE" : exists ? "PUT" : "POST", layer, signal: controller.signal
       });
@@ -175,9 +159,12 @@
       exists = !remove;
       populate(saved ?? {});
       notice = remove ? "Layer removed. Parent settings now apply." : "Context saved.";
-      void loadEffective(accountId, essayPath?.join("/") ?? null);
+      void preview.load(accountId, essayPath);
     } catch (err) {
-      if (!controller.signal.aborted) error = err instanceof Error ? err.message : String(err);
+      if (!controller.signal.aborted) {
+        error = err instanceof Error ? err.message : String(err);
+        void preview.load(accountId, essayPath);
+      }
     } finally {
       if (!controller.signal.aborted) busy = false;
     }
@@ -263,9 +250,12 @@
   {/if}
   <details class="effective-context" open>
     <summary>Effective essay context</summary>
+    {#if essayPath && !effectiveError}
+      <button type="button" disabled={effectiveLoading || busy} on:click={() => preview.load(accountId, essayPath)}>Refresh preview</button>
+    {/if}
     {#if !essayPath}<p class="context-hint">Select an essay to see its combined settings.</p>
     {:else if effectiveLoading}<p role="status">Resolving context…</p>
-    {:else if effectiveError}<p role="alert" class="context-error">{effectiveError}</p><button type="button" on:click={() => loadEffective(accountId, essayPath?.join("/") ?? null)}>Retry preview</button>
+    {:else if effectiveError}<p role="alert" class="context-error">{effectiveError}</p><button type="button" disabled={busy} on:click={() => preview.load(accountId, essayPath)}>Retry preview</button>
     {:else if effective}
       <p class="context-hint">Saved settings from root through the essay’s folder. {essayPath.join("/")}</p>
       <dl>{#each ["title", "audience", "model"] as key}<div><dt>{key}</dt><dd>{effective[key as "title" | "audience" | "model"] ?? "Not set"}</dd></div>{/each}</dl>
