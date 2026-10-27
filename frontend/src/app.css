@@ -70,6 +70,8 @@ body {
     radial-gradient(circle at 10% 20%, var(--app-orb1) 0, transparent 34%),
     radial-gradient(circle at 90% 10%, var(--app-orb2) 0, transparent 28%),
     linear-gradient(180deg, var(--ctp-mantle) 0%, var(--ctp-crust) 80%);
+  /* Keep the gradient anchored to the viewport as panel content changes height. */
+  background-attachment: fixed;
 }
 
 main {
@@ -137,13 +139,13 @@ h3 {
   min-height: 68vh;
 }
 
-.panel::part(base) {
+sl-card::part(base) {
   background: color-mix(in oklab, var(--ctp-surface0) 84%, black 16%);
   border: 1px solid color-mix(in oklab, var(--ctp-surface2) 70%, black 30%);
   color: var(--ctp-text);
 }
 
-.panel::part(header) {
+sl-card::part(header) {
   border-bottom: 1px solid color-mix(in oklab, var(--ctp-surface2) 55%, black 45%);
 }
 
