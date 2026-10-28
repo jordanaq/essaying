@@ -47,6 +47,7 @@ executable haskell-essaying
     , servant >=0.20
     , servant-server >=0.20
     , text >=2.0
+    , transformers >=0.6
     , wai-cors >=0.2
     , wai-extra >=3.1
     , wai >=3.2
@@ -60,6 +61,7 @@ test-suite haskell-essaying-test
   main-is:          Main.hs
   other-modules:
       ContextAcceptance
+    , WorkspaceDiscovery
     , ContextErrors
     , ContextHandlers
     , Essaying.Context
@@ -95,6 +97,7 @@ test-suite haskell-essaying-test
     , servant-client >=0.20
     , servant-server >=0.20
     , text >=2.0
+    , transformers >=0.6
     , wai >=3.2
     , wai-extra >=3.1
     , warp >=3.3

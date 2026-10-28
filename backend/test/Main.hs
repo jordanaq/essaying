@@ -7,6 +7,7 @@ module Main where
 
 import ContextErrors qualified
 import ContextHandlers qualified
+import WorkspaceDiscovery qualified
 
 import ContextAcceptance qualified
 import Control.Exception (finally)
@@ -29,8 +30,6 @@ import Essaying.Persistence.Workspace
   , createWorkspaceEssay
   , deleteWorkspaceDirectory
   , deleteWorkspaceEssay
-  , essayFileName
-  , isEssayFile
   , isSafeSegment
   , listWorkspaceTree
   , loadWorkspaceEssay
@@ -78,7 +77,7 @@ import Servant.Client
   )
 import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
 import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, doesDirectoryExist, getCurrentDirectory, removeFile, removePathForcibly)
-import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Environment (getArgs, lookupEnv, setEnv, unsetEnv)
 import System.Exit (exitFailure)
 import System.FilePath ((</>), normalise, takeDirectory)
 import Test.HUnit (Counts (..), Test (..), assertEqual, assertFailure, runTestTT)
@@ -105,7 +104,8 @@ accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest 
 
 main :: IO ()
 main = do
-  counts <- runTestTT tests
+  args <- getArgs
+  counts <- runTestTT (if args == ["--workspace"] then workspaceTests else tests)
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
 tests :: Test
@@ -134,6 +134,12 @@ tests = TestList
   , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
   , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
   , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
+  , workspaceTests
+  ]
+
+workspaceTests :: Test
+workspaceTests = TestLabel "workspace" $ TestList
+  [ WorkspaceDiscovery.tests
   , TestLabel "workspace path helpers" workspacePathHelpers
   , TestLabel "workspace directory and essay persistence" workspacePersistence
   , TestLabel "workspace delete endpoints" workspaceDeleteEndpoints
@@ -141,9 +147,6 @@ tests = TestList
 
 workspacePathHelpers :: Test
 workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
-  assertEqual "essay filename gets markdown extension" "My Essay.md" (essayFileName "My Essay")
-  assertEqual "markdown files are essays" True (isEssayFile "essay.md")
-  assertEqual "other files are not essays" False (isEssayFile "context.json")
   assertEqual "ordinary segment is safe" True (isSafeSegment "History")
   assertEqual "empty segment is unsafe" False (isSafeSegment "")
   assertEqual "dot-dot segment is unsafe" False (isSafeSegment "..")
@@ -152,8 +155,8 @@ workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
       expectedRoot = cachePath </> "workspace"
   createDirectoryIfMissing True expectedRoot
   assertEqual "safe path resolves beneath root"
-    (Just (expectedRoot </> "History" </> "Essay.md"))
-    (safeResolvePath root ["History", "Essay.md"])
+    (Just (expectedRoot </> "History" </> "Essay"))
+    (safeResolvePath root ["History", "Essay"])
   assertEqual "unsafe path is rejected" Nothing (safeResolvePath root ["..", "outside"])
 
 workspacePersistence :: Test
@@ -170,31 +173,44 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "duplicate directory is reported" WorkspaceDirectoryAlreadyExists duplicateDirectory
 
   createdEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" (Just "# Causes\n")
-  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution.md"] "French-Revolution" "# Causes\n"
+  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution"] "French-Revolution" "# Causes\n"
   assertEqual "essay creation returns content" (WorkspaceEssayCreated expectedEssay) createdEssay
   duplicateEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing
   assertEqual "duplicate essay is reported" WorkspaceEssayAlreadyExists duplicateEssay
 
-  loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "created essay can be loaded" (Just expectedEssay) loadedEssay
-  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution.md"] "# Updated\n"
+  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] "# Updated\n"
   assertEqual "existing essay can be saved" True didSave
-  savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "saved content can be loaded" (Just (expectedEssay {markdown = "# Updated\n"})) savedEssay
 
+  let essayDirectory = rootPath </> "History" </> "French-Revolution"
+  writeFile (essayDirectory </> "prompt.md") "Keep assignment"
+  writeFile (essayDirectory </> "context.json") "{invalid"
+  emptySaved <- saveWorkspaceEssay workspace ["History", "French-Revolution"] ""
+  assertEqual "empty draft save succeeds despite broken context" True emptySaved
+  assertEqual "empty draft survives reload"
+    (Just (expectedEssay {markdown = ""}))
+    =<< loadWorkspaceEssay workspace ["History", "French-Revolution"]
+  assertEqual "saving leaves the prompt unchanged" "Keep assignment"
+    =<< readFile (essayDirectory </> "prompt.md")
+  assertEqual "saving leaves local context unchanged" "{invalid"
+    =<< readFile (essayDirectory </> "context.json")
+
   tree <- listWorkspaceTree workspace
-  assertEqual "tree includes directory and essay"
+  assertEqual "tree includes an essay directory as a leaf"
     [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
-      [WorkspaceNode "French-Revolution.md" ["History", "French-Revolution.md"] WorkspaceEssayNode []]]
+      [WorkspaceNode "French-Revolution" ["History", "French-Revolution"] WorkspaceEssayNode []]]
     tree
   writeFile (rootPath </> "History" </> "context.json") "private context"
   invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.json"]
   assertEqual "non-essay target is distinguished"
     (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "context.json"]))
     invalidEssayDelete
-  missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing.md"]
+  missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing"]
   assertEqual "missing essay is distinguished"
-    (WorkspaceDeleteFailed (WorkspaceDeleteTargetNotFound ["History", "Missing.md"]))
+    (WorkspaceDeleteFailed (WorkspaceDeleteTargetNotFound ["History", "Missing"]))
     missingEssayDelete
   invalidPathDelete <- deleteWorkspaceEssay workspace ["..", "outside.md"]
   assertEqual "invalid essay path is distinguished"
@@ -204,9 +220,9 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "essay delete identifies directory targets"
     (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History"]))
     essayDirectoryDelete
-  directoryEssayDelete <- deleteWorkspaceDirectory workspace ["History", "French-Revolution.md"]
-  assertEqual "directory delete identifies file targets"
-    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "French-Revolution.md"]))
+  directoryEssayDelete <- deleteWorkspaceDirectory workspace ["History", "French-Revolution"]
+  assertEqual "directory delete rejects essay directories"
+    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "French-Revolution"]))
     directoryEssayDelete
   rootDelete <- deleteWorkspaceDirectory workspace []
   assertEqual "workspace root deletion is denied"
@@ -221,19 +237,24 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     (WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink ["History", "linked.md"]))
     symlinkDelete
   removeFile linkedEssay
-  didDeleteEssay <- deleteWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  didDeleteEssay <- deleteWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "existing essay deletion succeeds" WorkspaceDeleteSucceeded didDeleteEssay
-  essayAfterDelete <- loadWorkspaceEssay workspace ["History", "French-Revolution.md"]
+  essayAfterDelete <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "deleted essay no longer loads" Nothing essayAfterDelete
+  assertEqual "essay deletion removes all internal files" False
+    =<< doesDirectoryExist essayDirectory
+  emptyCreated <- createWorkspaceEssay workspace ["History"] "Empty" Nothing
+  assertEqual "creation without text creates an empty draft"
+    (WorkspaceEssayCreated (WorkspaceEssayContent ["History", "Empty"] "Empty" "")) emptyCreated
   _ <- createWorkspaceDirectory workspace ["History"] "Notes"
   _ <- createWorkspaceEssay workspace ["History", "Notes"] "Nested" (Just "# Nested\n")
   didDeleteDirectory <- deleteWorkspaceDirectory workspace ["History"]
   assertEqual "recursive directory deletion succeeds" WorkspaceDeleteSucceeded didDeleteDirectory
   directoryAfterDelete <- doesDirectoryExist (rootPath </> "History")
   assertEqual "deleted directory is gone" False directoryAfterDelete
-  missingEssay <- loadWorkspaceEssay workspace ["History", "Missing.md"]
+  missingEssay <- loadWorkspaceEssay workspace ["History", "Missing"]
   assertEqual "missing essay loads as Nothing" Nothing missingEssay
-  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing.md"] "nope"
+  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] "nope"
   assertEqual "missing essay cannot be saved" False savedMissing
 
 workspaceDeleteEndpoints :: Test
@@ -252,7 +273,7 @@ workspaceDeleteEndpoints = TestCase $
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
             _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "delete-test"
             _ :<|> essayRoutes :<|> _ :<|> deleteDirectory :<|> _ :<|> _ = workspaceRoutes
-            _ :<|> (_ :<|> deleteEssay) = essayRoutes ["Remove Me.md"]
+            _ :<|> (_ :<|> deleteEssay) = essayRoutes ["Remove Me"]
 
         essayResult <- runClientM deleteEssay env
         case essayResult of
@@ -264,9 +285,9 @@ workspaceDeleteEndpoints = TestCase $
           Left err -> assertFailure ("directory delete endpoint failed: " <> show err)
           Right noContent -> assertEqual "directory delete returns NoContent" NoContent noContent
 
-        deletedEssay <- loadWorkspaceEssay wsRoot ["Remove Me.md"]
-        assertEqual "essay endpoint removes the requested file" Nothing deletedEssay
-        nestedEssay <- loadWorkspaceEssay wsRoot ["History", "Nested.md"]
+        deletedEssay <- loadWorkspaceEssay wsRoot ["Remove Me"]
+        assertEqual "essay endpoint removes the requested directory" Nothing deletedEssay
+        nestedEssay <- loadWorkspaceEssay wsRoot ["History", "Nested"]
         assertEqual "directory endpoint removes nested essays" Nothing nestedEssay
 
 healthResponseValue :: Test

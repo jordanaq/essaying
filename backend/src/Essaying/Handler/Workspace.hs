@@ -133,6 +133,7 @@ createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParent
   case result of
     WorkspaceEssayCreated content -> pure content
     WorkspaceEssayAlreadyExists -> throwError err409
+    WorkspaceEssayClobbersDirectory -> throwError err409
     WorkspaceEssayCreationFailed _ -> throwError err400
 
 -- Context endpoints require a real selected account before inspecting its files.

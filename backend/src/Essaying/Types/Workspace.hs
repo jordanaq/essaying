@@ -83,6 +83,7 @@ data CreateWorkspaceDirectoryResult
 data CreateWorkspaceEssayResult
   = WorkspaceEssayCreated WorkspaceEssayContent
   | WorkspaceEssayAlreadyExists
+  | WorkspaceEssayClobbersDirectory
   | WorkspaceEssayCreationFailed Text
   deriving stock (Eq, Show)
 

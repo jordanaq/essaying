@@ -10,9 +10,11 @@ module Essaying.Persistence.Workspace
   , deleteWorkspaceEssay
   , deleteWorkspaceDirectory
     -- * Path helpers (internal, exported for testing)
+  , loadWorkspaceNode
   , safeResolvePath
   , isSafeSegment
   , essayFileName
+  , isEssayDir
   , isEssayFile
   ) where
 
@@ -30,10 +32,13 @@ import Essaying.Types.Workspace
   , WorkspaceNodeType (..)
   )
 import Essaying.Utils (debug_)
-import Control.Monad (forM)
-import Data.Maybe (catMaybes, fromJust)
-import System.Directory (createDirectory, doesDirectoryExist, doesFileExist, listDirectory, pathIsSymbolicLink, removeFile, removeDirectoryRecursive)
-import System.FilePath ((</>), dropExtension)
+import Control.Monad (foldM, forM, guard, when, unless)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
+import Control.Monad.Trans.Maybe (runMaybeT, MaybeT (..))
+import Data.Maybe (catMaybes, fromJust, isJust)
+import System.Directory (createDirectory, doesDirectoryExist, doesPathExist, doesFileExist, listDirectory, pathIsSymbolicLink, removeFile, removeDirectoryRecursive)
+import System.FilePath ((</>), dropExtension, splitDirectories, takeDirectory, takeFileName)
 
 
 -- | Emit a workspace message when @HESSAY_DEBUG@ is at least the given level.
@@ -46,14 +51,32 @@ debug = debug_ "[Workspace]"
 essayFileName :: Text -> FilePath
 essayFileName essayName = Text.unpack essayName <> ".md"
 
--- | Build an essay path from its parent and extensionless title.
-essayPathSegments :: [Text] -> Text -> [Text]
-essayPathSegments parentPath essayTitle = parentPath <> [Text.pack (essayFileName essayTitle)]
+-- | Required draft filename inside an essay directory.
+essayDraftFileName :: FilePath
+essayDraftFileName = "essay.md"
 
--- | Check whether a filename looks like an essay (ends with .md).
+-- | Build an essay path from its parent and extensionless title.
+essayPathSegments :: FilePath -> FilePath
+essayPathSegments = (</> essayDraftFileName)
+
+-- | Check whether a path is a directory and contains an `essay.md` file.
+isEssayDir :: FilePath -> IO Bool
+isEssayDir path = do
+  isDir <- doesDirectoryExist path
+  if not isDir
+    then return False
+    else do
+      isSymLink <- pathIsSymbolicLink path
+      let essayPath = path </> essayDraftFileName
+      if not isSymLink
+        then
+          doesFileExist essayPath >>= \exists ->
+            if exists then not <$> pathIsSymbolicLink essayPath else return False
+        else return False
+
+-- TODO: Temporary
 isEssayFile :: FilePath -> Bool
-isEssayFile =
-  (Text.isSuffixOf ".md") . Text.pack
+isEssayFile = Text.isSuffixOf ".md" . Text.pack
 
 -- | A path segment is safe if it is non-empty, contains no path
 -- separators, and is not \"..\" or \".\".
@@ -72,7 +95,48 @@ safeResolvePath workspaceRoot segments =
   if all isSafeSegment segments
     then Just $ foldl (</>) (unWorkspaceRoot workspaceRoot) (map Text.unpack segments)
     else Nothing
-  
+
+-- | Resolve a non-root node, using the caller's error type.
+resolveWorkspaceNodePath :: e -> WorkspaceRoot -> [Text] -> ExceptT e IO FilePath
+resolveWorkspaceNodePath invalidPath workspaceRoot segments = do
+  unless (not (null segments)) $ throwE invalidPath
+  ExceptT $ pure $ maybe (Left invalidPath) Right (safeResolvePath workspaceRoot segments)
+
+-- | Require organizational parents below the workspace root. Call after path
+-- and symlink validation; the target itself is not included in parentSegments.
+requireNonEssayParents :: e -> WorkspaceRoot -> [Text] -> ExceptT e IO ()
+requireNonEssayParents nestedError workspaceRoot parentSegments = do
+  let parents = drop 1 $
+        scanl (</>) (unWorkspaceRoot workspaceRoot) (map Text.unpack parentSegments)
+  mapM_ (\parent -> do
+    isEssay <- liftIO $ isEssayDir parent
+    when isEssay $ throwE nestedError) parents
+
+-- | Validate an existing essay target without reading or modifying its draft.
+requireWorkspaceEssay :: WorkspaceRoot -> [Text] -> ExceptT WorkspaceDeleteError IO FilePath
+requireWorkspaceEssay workspaceRoot segments = do
+  path <- resolveWorkspaceNodePath (WorkspaceDeleteInvalidPath segments) workspaceRoot segments
+  exists <- liftIO $ doesPathExist path
+  unless exists $ throwE (WorkspaceDeleteTargetNotFound segments)
+  isSymlink <- liftIO $ pathIsSymbolicLink path
+  when isSymlink $ throwE (WorkspaceDeleteSymbolicLink segments)
+  isEssay <- liftIO $ isEssayDir path
+  unless isEssay $ throwE (WorkspaceDeleteWrongTargetType segments)
+  pure path
+
+-- | Reads and saves expose validation failure as Nothing rather than an error.
+workspaceEssayPath :: WorkspaceRoot -> [Text] -> MaybeT IO FilePath
+workspaceEssayPath workspaceRoot segments = MaybeT $
+  either (const Nothing) Just <$> runExceptT (requireWorkspaceEssay workspaceRoot segments)
+
+-- | Check if a given path has any symbolic link in its components.
+hasSymlinkInPath :: FilePath -> IO Bool
+hasSymlinkInPath path =
+  foldM
+    (\found component ->
+      if found then pure True else pathIsSymbolicLink component)
+    False
+    (scanl1 (</>) (splitDirectories path))
 
 -- | Recursively walk the workspace directory and produce a tree of
 -- 'WorkspaceNode' values.  Directories become 'WorkspaceDirectoryNode';
@@ -89,17 +153,25 @@ listWorkspaceTreeAt parentSegments rootPath = do
   nodes <- forM entries $ \entry -> do
     let fullPath = rootPath </> entry
         entryText = Text.pack entry
-    isDir <- doesDirectoryExist fullPath
-    if isDir
-      then do
-        let nodeSegments = parentSegments <> [entryText]
-        subNodes <- listWorkspaceTreeAt nodeSegments fullPath
-        return $ Just $ WorkspaceNode entryText nodeSegments WorkspaceDirectoryNode subNodes
-      else if isEssayFile entry
+
+    isSym <- pathIsSymbolicLink fullPath
+    if isSym
+      then return Nothing
+      else do
+      isEssay <- isEssayDir fullPath
+      if isEssay
         then do
           let nodeSegments = parentSegments <> [entryText]
           return $ Just $ WorkspaceNode entryText nodeSegments WorkspaceEssayNode []
-        else return Nothing
+        else do
+          isDir <- doesDirectoryExist fullPath
+          if isDir
+            then do
+              let nodeSegments = parentSegments <> [entryText]
+              subNodes <- listWorkspaceTreeAt nodeSegments fullPath
+              return $ Just $ WorkspaceNode entryText nodeSegments WorkspaceDirectoryNode subNodes
+            else return Nothing
+
   return $ catMaybes nodes
 
 
@@ -110,40 +182,31 @@ loadWorkspaceNode workspaceRoot segments = do
   let mPath = safeResolvePath workspaceRoot segments
   case mPath of
     Nothing -> return Nothing
-    Just path -> do
-      isDir <- doesDirectoryExist path
-      if isDir
-        then do
-          children <- listDirectory path
-          childNodes <- mapM (\child -> loadWorkspaceNode workspaceRoot (segments <> [childSegment child])) children
-          return $ Just $ WorkspaceNode (last segments) segments WorkspaceDirectoryNode (catMaybes childNodes)
+    Just path -> runMaybeT $ do
+      guard (not (null segments))
+      isDir <- liftIO $ doesDirectoryExist path
+      guard isDir
+      isSym <- liftIO $ pathIsSymbolicLink path
+      guard (not isSym)
+
+      isEssay <- liftIO $ isEssayDir path
+      if isEssay
+        then pure $ WorkspaceNode (last segments) segments WorkspaceEssayNode []
         else do
-          isEssay <- doesFileExist path
-          if isEssay
-            then return $ Just $ WorkspaceNode (last segments) segments WorkspaceEssayNode []
-            else return Nothing
+          children <- liftIO $ listDirectory path
+          childNodes <- liftIO $ mapM (\child -> loadWorkspaceNode workspaceRoot (segments <> [childSegment child])) children
+          pure $ WorkspaceNode (last segments) segments WorkspaceDirectoryNode (catMaybes childNodes)
   where
     childSegment = Text.pack
 
--- | Load an essay using path segments that include the @.md@ extension
--- (e.g. @[\"History\", \"French-Revolution.md\"]@).
--- Returns 'Nothing' if the file does not exist or the path is unsafe.
+-- | Load an essay using path segments that point to an essay dir.
+-- Returns 'Nothing' if the directory is not an essay or the path is unsafe.
 loadWorkspaceEssay :: WorkspaceRoot -> [Text] -> IO (Maybe WorkspaceEssayContent)
-loadWorkspaceEssay workspaceRoot segments = do
-  case null segments || not (isEssayFile (Text.unpack (last segments))) of
-    True -> return Nothing
-    False -> do
-      let essayTitle = Text.pack (dropExtension (Text.unpack (last segments)))
-          mPath = safeResolvePath workspaceRoot segments
-      case mPath of
-        Nothing -> return Nothing
-        Just filePath -> do
-          exists <- doesFileExist filePath
-          if exists
-            then do
-              essayMarkdown <- TextIO.readFile filePath
-              return $ Just $ WorkspaceEssayContent segments essayTitle essayMarkdown
-            else return Nothing
+loadWorkspaceEssay workspaceRoot segments = runMaybeT $ do
+  path <- workspaceEssayPath workspaceRoot segments
+  let essayTitle = last segments
+  essayMarkdown <- liftIO $ TextIO.readFile (path </> essayDraftFileName)
+  pure $ WorkspaceEssayContent segments essayTitle essayMarkdown
 
 -- | Create a new directory under @parentPath@.  If the directory already
 -- exists, return 'WorkspaceDirectoryAlreadyExists'. The parent must
@@ -170,7 +233,7 @@ createWorkspaceDirectory workspaceRoot parentPath newDirName = do
           workspaceNode <- loadWorkspaceNode workspaceRoot segments
           return $ WorkspaceDirectoryCreated $ fromJust workspaceNode
 
--- | Create a new essay file under @parentPath@.  If the essay already
+-- | Create a new essay directory under @parentPath@. If the essay already
 -- exists, return 'WorkspaceEssayAlreadyExists'.  When @markdown@ is
 -- 'Nothing', write an empty file. The parent must already exist;
 -- unsafe paths return a failure and filesystem errors propagate.
@@ -181,92 +244,109 @@ createWorkspaceEssay
   -> Maybe Text -- ^ initial markdown content
   -> IO CreateWorkspaceEssayResult
 createWorkspaceEssay workspaceRoot parentPath essayName mMarkdown = do
-  let segments = essayPathSegments parentPath essayName
-      pathM = safeResolvePath workspaceRoot segments
-  case pathM of
-    Nothing -> return $ WorkspaceEssayCreationFailed "Invalid path"
-    Just path -> do
-      exists <- doesFileExist path
-      if exists
-        then return $ WorkspaceEssayAlreadyExists
-        else do
-          debug 3 $ "Creating essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-            <> " path=" <> show path
-          case mMarkdown of
-            Nothing -> writeFile path ""
-            Just markdown -> writeFile path (Text.unpack markdown)
-          content <- loadWorkspaceEssay workspaceRoot segments
-          return $ WorkspaceEssayCreated $ fromJust content
+  result <- runExceptT $ do
+    let segments = parentPath <> [essayName]
+
+    path <- resolveWorkspaceNodePath
+      (WorkspaceEssayCreationFailed "Invalid path") workspaceRoot segments
+
+    doesParentExist <- liftIO $ doesDirectoryExist (takeDirectory path)
+    unless doesParentExist $ throwE (WorkspaceEssayCreationFailed "Parent directory does not exist")
+
+    hasSymlink <- liftIO $ hasSymlinkInPath (takeDirectory path)
+    when hasSymlink $ throwE (WorkspaceEssayCreationFailed "Path contains a symbolic link")
+
+    requireNonEssayParents (WorkspaceEssayCreationFailed "Nested essay detected")
+      workspaceRoot parentPath
+
+    isEssay <- liftIO $ isEssayDir path
+    when isEssay $ throwE WorkspaceEssayAlreadyExists
+
+    isDir <- liftIO $ doesDirectoryExist path
+    when isDir $ throwE WorkspaceEssayClobbersDirectory
+
+    -- Doesn't check for dangling symlinks but whatever
+    pathHasTarget <- liftIO $ doesPathExist path
+    when pathHasTarget $ throwE (WorkspaceEssayCreationFailed "Path already exists")
+
+    liftIO $ debug 3 $ "Creating essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
+      <> " path=" <> show path
+    liftIO $ createDirectory path
+    liftIO $ TextIO.writeFile (essayPathSegments path) (maybe "" id mMarkdown)
+
+    content <- liftIO $ loadWorkspaceEssay workspaceRoot segments
+    case content of
+      Nothing -> throwE (WorkspaceEssayCreationFailed "Unable to load created essay")
+      Just essay -> pure essay
+
+  pure $ case result of
+    Left failure -> failure
+    Right essay -> WorkspaceEssayCreated essay
 
 -- | Overwrite an existing @.md@ essay. Return 'False' for an empty,
 -- non-essay, unsafe, or missing path; filesystem errors propagate.
 saveWorkspaceEssay
   :: WorkspaceRoot
-  -> [Text]    -- ^ essay path (including the @.md@ extension)
+  -> [Text]    -- ^ essay path
   -> Text      -- ^ new markdown content
   -> IO Bool
-saveWorkspaceEssay workspaceRoot essayPath newMarkdown
-  | null essayPath || not (isEssayFile (Text.unpack (last essayPath))) = return False
-  | otherwise =
-      case safeResolvePath workspaceRoot essayPath of
-        Just path -> do
-          exists <- doesFileExist path
-          if exists
-            then do
-              debug 3 $ "Saving essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-                <> " path=" <> show path
-              TextIO.writeFile path newMarkdown
-              return True
-            else return False
-        Nothing -> return False
+saveWorkspaceEssay workspaceRoot essayPath newMarkdown =
+  fmap isJust . runMaybeT $ do
+    path <- workspaceEssayPath workspaceRoot essayPath
 
--- | Delete an existing @.md@ file, refusing unsafe paths, directories,
--- and symbolic-link targets. Filesystem errors propagate.
+    let essayFilePath = essayPathSegments path
+
+    liftIO $ debug 3 $ "Saving essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
+      <> " path=" <> show essayFilePath
+    liftIO $ TextIO.writeFile essayFilePath newMarkdown
+
+-- | Delete an existing essay directory.
 deleteWorkspaceEssay :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult
-deleteWorkspaceEssay workspaceRoot essayPath
-  | null essayPath = pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath essayPath)
-  | not (isEssayFile (Text.unpack (last essayPath))) =
-      pure $ WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType essayPath)
-  | otherwise =
-      case safeResolvePath workspaceRoot essayPath of
-        Nothing -> pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath essayPath)
-        Just path -> do
-          exists <- doesFileExist path
-          if not exists
-            then do
-              isDirectory <- doesDirectoryExist path
-              pure $ WorkspaceDeleteFailed
-                (if isDirectory then WorkspaceDeleteWrongTargetType essayPath else WorkspaceDeleteTargetNotFound essayPath)
-            else do
-              isSymlink <- pathIsSymbolicLink path
-              if isSymlink
-                then pure $ WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink essayPath)
-                else do
-                  debug 3 $ "Deleting essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-                    <> " path=" <> show path
-                  removeFile path
-                  pure WorkspaceDeleteSucceeded
+deleteWorkspaceEssay workspaceRoot essayPath = do
+  result <- runExceptT $ do
+    path <- requireWorkspaceEssay workspaceRoot essayPath
+
+    hasSymlink <- liftIO $ hasSymlinkInPath path
+    unless (not hasSymlink) $ throwE (WorkspaceDeleteSymbolicLink essayPath)
+
+    requireNonEssayParents (WorkspaceDeleteWrongTargetType essayPath)
+      workspaceRoot (take (length essayPath - 1) essayPath)
+
+    liftIO $ debug 3 $ "Deleting essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
+      <> " path=" <> show path
+    liftIO $ removeDirectoryRecursive path
+
+  case result of
+    Left failure -> pure (WorkspaceDeleteFailed failure)
+    Right _ -> pure WorkspaceDeleteSucceeded
 
 -- | Recursively delete a directory and its contents. Refuse the workspace
 -- root, unsafe paths, files, and symbolic-link targets. IO errors propagate.
 deleteWorkspaceDirectory :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult
 deleteWorkspaceDirectory _ [] = pure $ WorkspaceDeleteFailed WorkspaceDeleteRootDenied
-deleteWorkspaceDirectory workspaceRoot dirPath =
-  case safeResolvePath workspaceRoot dirPath of
-    Nothing -> pure $ WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath dirPath)
-    Just path -> do
-      exists <- doesDirectoryExist path
-      if not exists
-        then do
-          isFile <- doesFileExist path
-          pure $ WorkspaceDeleteFailed
-            (if isFile then WorkspaceDeleteWrongTargetType dirPath else WorkspaceDeleteTargetNotFound dirPath)
-        else do
-          isSymlink <- pathIsSymbolicLink path
-          if isSymlink
-            then pure $ WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink dirPath)
-            else do
-              debug 3 $ "Deleting directory recursively in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-                <> " path=" <> show path
-              removeDirectoryRecursive path
-              pure WorkspaceDeleteSucceeded
+deleteWorkspaceDirectory workspaceRoot dirPath = do
+  result <- runExceptT $ do
+    path <- resolveWorkspaceNodePath (WorkspaceDeleteInvalidPath dirPath) workspaceRoot dirPath
+
+    exists <- liftIO $ doesPathExist path
+    unless exists $ throwE (WorkspaceDeleteTargetNotFound dirPath)
+
+    hasSymlink <- liftIO $ hasSymlinkInPath path
+    when hasSymlink $ throwE (WorkspaceDeleteSymbolicLink dirPath)
+
+    requireNonEssayParents (WorkspaceDeleteWrongTargetType dirPath)
+      workspaceRoot (take (length dirPath - 1) dirPath)
+
+    isEssay <- liftIO $ isEssayDir path
+    when isEssay $ throwE (WorkspaceDeleteWrongTargetType dirPath)
+
+    isFile <- liftIO $ doesFileExist path
+    when isFile $ throwE (WorkspaceDeleteWrongTargetType dirPath)
+
+    liftIO $ debug 3 $ "Deleting directory recursively in workspace=" <> show (unWorkspaceRoot workspaceRoot)
+      <> " path=" <> show path
+    liftIO $ removeDirectoryRecursive path
+
+  case result of
+    Left failure -> pure (WorkspaceDeleteFailed failure)
+    Right _ -> pure WorkspaceDeleteSucceeded
