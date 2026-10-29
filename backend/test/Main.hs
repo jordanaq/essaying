@@ -499,52 +499,54 @@ validateEssayPathForContext :: Test
 validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
       workspace = WorkspaceRoot rootPath
-      essayPath = "History/causes.md"
-      fullEssayPath = rootPath </> essayPath
-  createDirectoryIfMissing True (takeDirectory fullEssayPath)
+      essayPath = "History/Causes"
+      essayDirectory = rootPath </> essayPath
+      draftPath = essayDirectory </> "essay.md"
+  createDirectoryIfMissing True (rootPath </> "History")
 
-  missing <- loadEffectiveContext workspace essayPath
   assertEqual "missing essay is an error"
-    (Left (EffectiveContextEssayNotFound essayPath)) missing
+    (Left (EffectiveContextEssayNotFound essayPath))
+    =<< loadEffectiveContext workspace essayPath
   assertEqual "missing ancestor is an error"
-    (Left (EffectiveContextEssayNotFound "Missing/causes.md"))
-    =<< loadEffectiveContext workspace "Missing/causes.md"
+    (Left (EffectiveContextEssayNotFound "Missing/Causes"))
+    =<< loadEffectiveContext workspace "Missing/Causes"
   assertEqual "path traversal is rejected"
-    (Left (EffectiveContextInvalidPath "../causes.md"))
-    =<< loadEffectiveContext workspace "../causes.md"
-  assertEqual "non-essay extension is rejected"
-    (Left (EffectiveContextInvalidPath "History/causes.txt"))
-    =<< loadEffectiveContext workspace "History/causes.txt"
+    (Left (EffectiveContextInvalidPath "../Causes"))
+    =<< loadEffectiveContext workspace "../Causes"
 
-  writeFile fullEssayPath "# Causes\n"
-  valid <- loadEffectiveContext workspace essayPath
-  assertEqual "existing essay path is accepted" (Right emptyEffectiveContext) valid
+  createDirectoryIfMissing True essayDirectory
+  assertEqual "ordinary directory without a draft marker is not an essay"
+    (Left (EffectiveContextEssayNotFound essayPath))
+    =<< loadEffectiveContext workspace essayPath
+  writeFile draftPath ""
+  assertEqual "directory with an empty draft is an essay" (Right emptyEffectiveContext)
+    =<< loadEffectiveContext workspace essayPath
 
-  removeFile fullEssayPath
+  removeFile draftPath
   let outsidePath = cachePath </> "outside.md"
   writeFile outsidePath "# Outside\n"
-  createFileLink outsidePath fullEssayPath
-  linked <- loadEffectiveContext workspace essayPath
-  assertEqual "essay symlink is rejected"
-    (Left (EffectiveContextSymbolicLink essayPath)) linked
+  createFileLink outsidePath draftPath
+  assertEqual "draft marker symlink is rejected"
+    (Left (EffectiveContextSymbolicLink "History/Causes/essay.md"))
+    =<< loadEffectiveContext workspace essayPath
 
   let outsideDirectory = cachePath </> "outside-folder"
-  createDirectoryIfMissing True outsideDirectory
-  writeFile (outsideDirectory </> "causes.md") "# Linked directory\n"
+  createDirectoryIfMissing True (outsideDirectory </> "Causes")
+  writeFile (outsideDirectory </> "Causes" </> "essay.md") "# Linked directory\n"
   createDirectoryLink outsideDirectory (rootPath </> "Linked")
-  linkedDirectory <- loadEffectiveContext workspace "Linked/causes.md"
   assertEqual "ancestor directory symlink is rejected"
-    (Left (EffectiveContextSymbolicLink "Linked")) linkedDirectory
+    (Left (EffectiveContextSymbolicLink "Linked"))
+    =<< loadEffectiveContext workspace "Linked/Causes"
 
 resolveInheritedContextFiles :: Test
 resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
       workspace = WorkspaceRoot rootPath
-      essayPath = "History/French-Revolution/causes.md"
+      essayPath = "History/French-Revolution"
       historyPath = rootPath </> "History"
       essayDirectory = historyPath </> "French-Revolution"
   createDirectoryIfMissing True essayDirectory
-  writeFile (essayDirectory </> "causes.md") "# Causes\n"
+  writeFile (essayDirectory </> "essay.md") "# Causes\n"
   writeFile (rootPath </> "context.json")
     "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"student\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"writing\"]}}"
   writeFile (historyPath </> "context.json")

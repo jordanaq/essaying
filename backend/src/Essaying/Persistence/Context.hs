@@ -10,35 +10,38 @@ module Essaying.Persistence.Context
 where
 
 import Control.Exception (IOException, try)
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless, when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Data.Aeson (encode)
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString qualified as BS
 import Data.Text qualified as Text
 import Essaying.Context (emptyEffectiveContext, applyLayer)
-import Essaying.Persistence.Workspace (isEssayFile, isSafeSegment, safeResolvePath)
+import Essaying.Persistence.Workspace (essayDraftFileName, isEssayDir, isSafeSegment, requireNonEssayParents, safeResolvePath)
+import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Types.Context (decodeContextLayer, ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Utils (debug_)
-import System.Directory (doesFileExist, pathIsSymbolicLink, removeFile)
-import System.FilePath ((</>), isAbsolute, makeRelative)
-import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
+import System.Directory (removeFile, doesFileExist)
+import System.FilePath ((</>), isAbsolute)
+import System.IO.Error (ioeGetErrorString)
 
 -- | Emit context filesystem messages when @HESSAY_DEBUG@ is at least 3.
 debug :: Int -> String -> IO ()
 debug = debug_ "[Context]"
 
 -- | Load and apply @context.json@ files from the workspace root through the
--- essay's parent directory, in that order. The essay path must be a safe,
--- workspace-relative @.md@ path to an existing file. Missing context files
--- are skipped; invalid or unreadable ones return an error.
+-- essay directory itself, in that order. The essay path must be a safe,
+-- workspace-relative directory containing a regular @essay.md@ file. Missing
+-- context files are skipped; invalid or unreadable ones return an error.
 loadEffectiveContext :: WorkspaceRoot -> FilePath -> IO (Either EffectiveContextError EffectiveContext)
 loadEffectiveContext workspaceRoot essayPath = do
   validated <- validateEssayPath workspaceRoot essayPath
   case validated of
     Left err -> pure (Left err)
     Right essaySegments -> do
-      let contextDirs = scanl (</>) "" (init essaySegments)
+      let contextDirs = scanl (</>) "" essaySegments
           contextPaths = map (</> "context.json") contextDirs
       resolved <- foldM foldContextH (Right emptyEffectiveContext) contextPaths
       case resolved of
@@ -58,30 +61,45 @@ loadEffectiveContext workspaceRoot essayPath = do
         Right Nothing -> pure (Right ctx)
         Right (Just layer) -> pure (Right (applyLayer ctx layer))
 
--- | Validate an existing essay path and return its workspace-relative
--- segments. Reject unsafe paths, non-@.md@ targets, and symbolic links.
--- Context discovery reuses the segments to find ancestor directories.
+-- | Validate an essay directory and return its workspace-relative directory
+-- segments. Reject unsafe paths, symbolic links (including the draft marker),
+-- missing markers, and targets nested inside another essay.
 validateEssayPath :: WorkspaceRoot -> FilePath -> IO (Either EffectiveContextError [FilePath])
-validateEssayPath workspaceRoot@(WorkspaceRoot root) essayPath =
-  case relativeSegments essayPath of
-    Nothing -> pure (Left (EffectiveContextInvalidPath essayPath))
-    Just segments
-      | not (isEssayFile (last segments)) ->
-          pure (Left (EffectiveContextInvalidPath essayPath))
-      | otherwise ->
-          case safeResolvePath workspaceRoot (map Text.pack segments) of
-            Nothing -> pure (Left (EffectiveContextInvalidPath essayPath))
-            Just fullPath -> do
-              checked <- checkEntries root (scanl (</>) root segments)
-              case checked of
-                Left err -> pure (Left (essayPathError essayPath err))
-                Right False -> pure (Left (EffectiveContextEssayNotFound essayPath))
-                Right True -> do
-                  checkedFile <- try (doesFileExist fullPath) :: IO (Either IOException Bool)
-                  pure $ case checkedFile of
-                    Left err -> Left (EffectiveContextIoError essayPath (ioeGetErrorString err))
-                    Right False -> Left (EffectiveContextEssayNotFound essayPath)
-                    Right True -> Right segments
+validateEssayPath workspaceRoot@(WorkspaceRoot root) essayPath = runExceptT $ do
+  segments <- ExceptT $ pure $
+    maybe (Left (EffectiveContextInvalidPath essayPath)) Right (relativeSegments essayPath)
+
+  fullPath <- ExceptT $ pure $
+    maybe (Left (EffectiveContextInvalidPath essayPath)) Right
+      (safeResolvePath workspaceRoot (map Text.pack segments))
+
+  isFile <- checkedIO $ doesFileExist fullPath
+  when isFile $ throwE (EffectiveContextEssayNotFound essayPath)
+
+  let directoryPaths = scanl (</>) root segments
+      draftPath = fullPath </> essayDraftFileName
+
+  checked <- liftIO $ checkEntries root (directoryPaths <> [draftPath])
+  exists <- ExceptT $ pure $
+    either (Left . essayPathError essayPath) Right checked
+  unless exists $ throwE (EffectiveContextEssayNotFound essayPath)
+
+  isEssay <- checkedIO $ isEssayDir fullPath
+  unless isEssay $ throwE (EffectiveContextEssayNotFound essayPath)
+
+  parentCheck <- checkedIO $ runExceptT $
+    requireNonEssayParents (EffectiveContextInvalidPath essayPath)
+      workspaceRoot (map Text.pack (init segments))
+  either throwE pure parentCheck
+
+  pure segments
+  where
+    checkedIO :: IO a -> ExceptT EffectiveContextError IO a
+    checkedIO action = ExceptT $ do
+      result <- try action
+      pure $ case result of
+        Left (err :: IOException) -> Left (EffectiveContextIoError essayPath (ioeGetErrorString err))
+        Right value -> Right value
 
 -- | Translate a path-check error into the corresponding essay-path error.
 essayPathError :: FilePath -> ContextLayerError -> EffectiveContextError
@@ -138,17 +156,13 @@ relativeSegments path
 -- links. Return 'False' only when the final entry is absent; a missing
 -- intermediate entry or a symbolic link is an error.
 checkEntries :: FilePath -> [FilePath] -> IO (Either ContextLayerError Bool)
-checkEntries _ [] = pure (Right True)
-checkEntries root (fullPath : remaining) = do
-  let label = makeRelative root fullPath
-  checked <- try (pathIsSymbolicLink fullPath) :: IO (Either IOException Bool)
-  case checked of
-    Right True -> pure (Left (ContextLayerSymbolicLink label))
-    Right False -> checkEntries root remaining
-    Left err
-      | isDoesNotExistError err && null remaining -> pure (Right False)
-      | isDoesNotExistError err -> pure (Left (ContextLayerInvalidPath label))
-      | otherwise -> pure (Left (ContextLayerIoError label (ioeGetErrorString err)))
+checkEntries root paths = do
+  checked <- checkPathEntries root paths
+  pure $ case checked of
+    Right exists -> Right exists
+    Left (PathSymbolicLink label) -> Left (ContextLayerSymbolicLink label)
+    Left (PathMissingParent label _) -> Left (ContextLayerInvalidPath label)
+    Left (PathIoError label err) -> Left (ContextLayerIoError label (ioeGetErrorString err))
 
 -- | Write a validated layer below a trusted workspace root. Parent directories
 -- must already exist; symbolic links are rejected just as they are on reads.

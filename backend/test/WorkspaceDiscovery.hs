@@ -3,6 +3,7 @@
 module WorkspaceDiscovery (tests) where
 
 import Control.Exception (bracket)
+import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Persistence.Workspace
   ( deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode )
 import Essaying.Types.Storage (WorkspaceRoot (..))
@@ -14,7 +15,7 @@ import System.Directory
   )
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
-import Test.HUnit (Test (..), assertEqual)
+import Test.HUnit (Test (..), assertEqual, assertFailure)
 
 withWorkspace :: (FilePath -> WorkspaceRoot -> IO a) -> IO a
 withWorkspace action = bracket acquire removePathForcibly $ \root ->
@@ -30,7 +31,30 @@ withWorkspace action = bracket acquire removePathForcibly $ \root ->
 
 tests :: Test
 tests = TestLabel "essay directory discovery" $ TestList
-  [ TestLabel "empty draft identifies an essay leaf" $ TestCase $
+  [ TestLabel "shared path check distinguishes missing target and parent" $ TestCase $
+      withWorkspace $ \root _ -> do
+        present <- checkPathEntries root [root]
+        case present of
+          Right True -> pure ()
+          other -> assertFailure ("expected existing path: " <> show other)
+        absent <- checkPathEntries root [root, root </> "Missing"]
+        case absent of
+          Right False -> pure ()
+          other -> assertFailure ("expected missing target: " <> show other)
+        missingParent <- checkPathEntries root
+          [root, root </> "Missing", root </> "Missing" </> "Child"]
+        case missingParent of
+          Left (PathMissingParent "Missing" _) -> pure ()
+          other -> assertFailure ("expected relative missing parent: " <> show other)
+  , TestLabel "shared path check stops at dangling links" $ TestCase $
+      withWorkspace $ \root _ -> do
+        createDirectoryLink (root </> "Absent") (root </> "Linked")
+        checked <- checkPathEntries root
+          [root, root </> "Linked", root </> "Linked" </> "Child"]
+        case checked of
+          Left (PathSymbolicLink "Linked") -> pure ()
+          other -> assertFailure ("expected link before missing child: " <> show other)
+  , TestLabel "empty draft identifies an essay leaf" $ TestCase $
       withWorkspace $ \root workspace -> do
         let essay = root </> "My Essay"
         createDirectory essay

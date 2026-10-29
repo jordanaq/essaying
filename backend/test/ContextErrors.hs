@@ -71,7 +71,8 @@ writeBody path layer = "{\"path\":" <> encode (BS.unpack path) <> ",\"contextLay
 tests :: Test
 tests = TestList
   [ TestLabel "stored and submitted validation retain exact field paths" $ TestCase $ withWorkspace $ \root -> do
-      writeFile (root </> "essay.md") "# Essay"
+      createDirectory (root </> "Essay")
+      writeFile (root </> "Essay/essay.md") "# Essay"
       forM_
         [ ("{\"title\":{\"tag\":\"SetScalar\",\"contents\":\" \"}}", "title.contents")
         , ("{\"instructions\":{\"tag\":\"AppendList\",\"contents\":[\"ok\",\" \"]}}", "instructions.contents[1]")
@@ -80,7 +81,7 @@ tests = TestList
         , ("{\"unexpected\":true}", "unexpected")
         ] $ \(source, field) -> do
           BL.writeFile (root </> "context.json") source
-          stored <- call "GET" (base <> "/effective?path=essay.md") "" >>= assertError 422 "INVALID_CONTEXT"
+          stored <- call "GET" (base <> "/effective?path=Essay") "" >>= assertError 422 "INVALID_CONTEXT"
           assertEqual "source path" (Just (String "context.json")) (member ["error", "details", "path"] stored)
           assertEqual "stored field" (Just (String field)) (member ["error", "details", "field"] stored)
           submitted <- call "PUT" base (writeBody "context.json" source) >>= assertError 422 "INVALID_CONTEXT"
@@ -92,9 +93,9 @@ tests = TestList
       writeFile (root </> "Child/essay.md") "# Essay"
       writeFile (root </> "context.json") "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\" \"}}"
       writeFile (root </> "Child/context.json") "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"Replacement\"}}"
-      value <- call "GET" (base <> "/effective?path=Child%2Fessay.md") "" >>= assertError 422 "INVALID_CONTEXT"
+      value <- call "GET" (base <> "/effective?path=Child") "" >>= assertError 422 "INVALID_CONTEXT"
       assertEqual "parent file" (Just (String "context.json")) (member ["error", "details", "path"] value)
-      saved <- call "PUT" "/api/v1/accounts/alice/workspace/essays/Child/essay.md" "{\"markdown\":\"Saved despite invalid context\"}"
+      saved <- call "PUT" "/api/v1/accounts/alice/workspace/essays/Child" "{\"markdown\":\"Saved despite invalid context\"}"
       assertEqual "essay save remains independent" 200 (statusCode (simpleStatus saved))
       assertEqual "essay persisted" "Saved despite invalid context" =<< readFile (root </> "Child/essay.md")
   , TestLabel "request decoding failures use a JSON envelope" $ TestCase $ withWorkspace $ \_ -> do
@@ -112,15 +113,42 @@ tests = TestList
           assertEqual "rejected path omitted" Nothing (member ["error", "details", "path"] value)
           assertBool "input is not echoed" (not (BS.isInfixOf path (BL.toStrict (simpleBody response))))
       _ <- call "GET" (base <> "?path=%2Fhome%2Fprivate%2Fcontext.json") "" >>= assertError 400 "INVALID_CONTEXT_PATH"
-      _ <- call "GET" (base <> "/effective?path=..%2Fprivate.md") "" >>= assertError 400 "INVALID_ESSAY_PATH"
+      _ <- call "GET" (base <> "/effective?path=..%2FPrivate") "" >>= assertError 400 "INVALID_ESSAY_PATH"
       pure ()
   , TestLabel "missing resources and absent effective layers are distinct" $ TestCase $ withWorkspace $ \root -> do
       _ <- call "GET" "/api/v1/accounts/missing/workspace/context?path=context.json" "" >>= assertError 404 "ACCOUNT_NOT_FOUND"
       _ <- call "GET" (base <> "?path=context.json") "" >>= assertError 404 "CONTEXT_NOT_FOUND"
-      _ <- call "GET" (base <> "/effective?path=missing.md") "" >>= assertError 404 "ESSAY_NOT_FOUND"
-      writeFile (root </> "essay.md") "# Essay"
-      response <- call "GET" (base <> "/effective?path=essay.md") ""
+      _ <- call "GET" (base <> "/effective?path=Missing") "" >>= assertError 404 "ESSAY_NOT_FOUND"
+      createDirectory (root </> "Essay")
+      writeFile (root </> "Essay/essay.md") "# Essay"
+      response <- call "GET" (base <> "/effective?path=Essay") ""
       assertEqual "no context is valid" 200 (statusCode (simpleStatus response))
+  , TestLabel "essay-local context mutations affect directory effective context" $ TestCase $ withWorkspace $ \root -> do
+      createDirectory (root </> "My Essay")
+      writeFile (root </> "My Essay/essay.md") ""
+      writeFile (root </> "context.json")
+        "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"Inherited\"}}"
+      let localPath = "My Essay/context.json"
+          effectiveUrl = base <> "/effective?path=My%20Essay"
+          assertTitle expected = do
+            response <- call "GET" effectiveUrl ""
+            assertEqual "effective response" 200 (statusCode (simpleStatus response))
+            assertEqual "effective title" (Just (String expected))
+              (decode (simpleBody response) >>= member ["title"])
+      assertTitle "Inherited"
+      created <- call "POST" base (writeBody localPath
+        "{\"title\":{\"tag\":\"SetScalar\",\"contents\":\"Local\"}}")
+      assertEqual "local layer created" 201 (statusCode (simpleStatus created))
+      assertTitle "Local"
+      updated <- call "PUT" base (writeBody localPath
+        "{\"title\":{\"tag\":\"ClearScalar\"}}")
+      assertEqual "local layer updated" 200 (statusCode (simpleStatus updated))
+      cleared <- call "GET" effectiveUrl ""
+      assertEqual "local clear overrides inherited title" (Just Null)
+        (decode (simpleBody cleared) >>= member ["title"])
+      deleted <- call "DELETE" base (encode (object ["path" .= ("My Essay/context.json" :: Text)]))
+      assertEqual "local layer deleted" 204 (statusCode (simpleStatus deleted))
+      assertTitle "Inherited"
   , TestLabel "syntax errors omit raw parser excerpts" $ TestCase $ withWorkspace $ \root -> do
       forM_ ["{private-value", "{} {}", "{\"title\":null,\"title\":null}"] $ \source -> do
         writeFile (root </> "context.json") source

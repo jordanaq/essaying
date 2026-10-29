@@ -25,6 +25,7 @@ executable haskell-essaying
     , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
     , Essaying.Persistence.Context
+    , Essaying.Persistence.Utils
     , Essaying.Persistence.Workspace
     , Essaying.Server
     , Essaying.Storage
@@ -73,6 +74,7 @@ test-suite haskell-essaying-test
     , Essaying.Handler.Workspace
     , Essaying.Persistence.Account
     , Essaying.Persistence.Context
+    , Essaying.Persistence.Utils
     , Essaying.Persistence.Workspace
     , Essaying.Server
     , Essaying.Storage

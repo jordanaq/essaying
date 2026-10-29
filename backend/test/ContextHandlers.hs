@@ -54,24 +54,24 @@ tests = TestList
       writeFile (root </> "Subject/essay.md") "# Essay"
       assertStatus 404 (loadContextHandler workspace "context.json")
       assertEqual "missing layers resolve to empty settings" (Right emptyEffectiveContext)
-        =<< runHandler (effectiveContextHandler workspace "Subject/essay.md")
+        =<< runHandler (effectiveContextHandler workspace "Subject")
       let parentLayer = layer {title = Just (SetScalar "Inherited title")}
       _ <- runHandler (createContextHandler workspace (CreateContextRequest "context.json" parentLayer))
       assertEqual "read returns saved operations" (Right parentLayer)
         =<< runHandler (loadContextHandler workspace "context.json")
-      inherited <- runHandler (effectiveContextHandler workspace "Subject/essay.md")
+      inherited <- runHandler (effectiveContextHandler workspace "Subject")
       let expected = decode "{\"title\":\"Inherited title\",\"audience\":null,\"model\":null,\"tags\":[],\"instructions\":[],\"grading_directions\":[],\"rubric\":{}}" :: Maybe EffectiveContext
       assertEqual "ancestor layer is applied" (Right <$> expected) (Just inherited)
       assertStatus 400 (loadContextHandler workspace "../context.json")
-      assertStatus 400 (effectiveContextHandler workspace "../essay.md")
-      assertStatus 404 (effectiveContextHandler workspace "Subject/missing.md")
+      assertStatus 400 (effectiveContextHandler workspace "../Essay")
+      assertStatus 404 (effectiveContextHandler workspace "Missing")
       writeFile (root </> "context.json") "invalid json"
       assertStatus 422 (loadContextHandler workspace "context.json")
-      assertStatus 422 (effectiveContextHandler workspace "Subject/essay.md")
+      assertStatus 422 (effectiveContextHandler workspace "Subject")
       removeFile (root </> "context.json")
       createFileLink (root </> "Subject/essay.md") (root </> "context.json")
       assertStatus 403 (loadContextHandler workspace "context.json")
-      assertStatus 403 (effectiveContextHandler workspace "Subject/essay.md")
+      assertStatus 403 (effectiveContextHandler workspace "Subject")
   , TestLabel "context handler lifecycle and account isolation" $ TestCase $ withWorkspace $ \root workspace -> do
       createDirectory (root </> "Subject")
       createDirectory (root </> "OtherAccount")

@@ -14,8 +14,9 @@ module Essaying.Persistence.Workspace
   , safeResolvePath
   , isSafeSegment
   , essayFileName
+  , essayDraftFileName
   , isEssayDir
-  , isEssayFile
+  , requireNonEssayParents
   ) where
 
 import Data.Text (Text)
@@ -32,13 +33,15 @@ import Essaying.Types.Workspace
   , WorkspaceNodeType (..)
   )
 import Essaying.Utils (debug_)
-import Control.Monad (foldM, forM, guard, when, unless)
+import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
+import Control.Monad (forM, guard, when, unless)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Control.Monad.Trans.Maybe (runMaybeT, MaybeT (..))
 import Data.Maybe (catMaybes, fromJust, isJust)
 import System.Directory (createDirectory, doesDirectoryExist, doesPathExist, doesFileExist, listDirectory, pathIsSymbolicLink, removeFile, removeDirectoryRecursive)
 import System.FilePath ((</>), dropExtension, splitDirectories, takeDirectory, takeFileName)
+import System.IO.Error (doesNotExistErrorType, mkIOError)
 
 
 -- | Emit a workspace message when @HESSAY_DEBUG@ is at least the given level.
@@ -73,10 +76,6 @@ isEssayDir path = do
           doesFileExist essayPath >>= \exists ->
             if exists then not <$> pathIsSymbolicLink essayPath else return False
         else return False
-
--- TODO: Temporary
-isEssayFile :: FilePath -> Bool
-isEssayFile = Text.isSuffixOf ".md" . Text.pack
 
 -- | A path segment is safe if it is non-empty, contains no path
 -- separators, and is not \"..\" or \".\".
@@ -131,12 +130,14 @@ workspaceEssayPath workspaceRoot segments = MaybeT $
 
 -- | Check if a given path has any symbolic link in its components.
 hasSymlinkInPath :: FilePath -> IO Bool
-hasSymlinkInPath path =
-  foldM
-    (\found component ->
-      if found then pure True else pathIsSymbolicLink component)
-    False
-    (scanl1 (</>) (splitDirectories path))
+hasSymlinkInPath path = do
+  checked <- checkPathEntries "" (scanl1 (</>) (splitDirectories path))
+  case checked of
+    Left (PathSymbolicLink _) -> pure True
+    Left (PathMissingParent _ err) -> ioError err
+    Left (PathIoError _ err) -> ioError err
+    Right True -> pure False
+    Right False -> ioError (mkIOError doesNotExistErrorType "hasSymlinkInPath" Nothing (Just path))
 
 -- | Recursively walk the workspace directory and produce a tree of
 -- 'WorkspaceNode' values.  Directories become 'WorkspaceDirectoryNode';
