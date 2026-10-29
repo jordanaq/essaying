@@ -34,6 +34,7 @@ import Essaying.Types.Workspace
   )
 import Essaying.Utils (debug_)
 import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
+import Control.Exception (bracketOnError)
 import Control.Monad (forM, guard, when, unless)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
@@ -306,13 +307,19 @@ createWorkspaceEssay workspaceRoot parentPath essayName mPrompt mMarkdown = do
 
     liftIO $ debug 3 $ "Creating essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
       <> " path=" <> show path
-    liftIO $ createDirectory path
-    liftIO $ TextIO.writeFile (essayPromptPath path) (maybe "" id mPrompt)
-    liftIO $ TextIO.writeFile (essayDraftPath path) (maybe "" id mMarkdown)
 
-    content <- liftIO $ loadWorkspaceEssay workspaceRoot segments
+    content <- liftIO $ bracketOnError
+      (createDirectory path >> pure path)
+      removeDirectoryRecursive
+        (\createdPath -> do
+          TextIO.writeFile (essayPromptPath createdPath) (maybe "" id mPrompt)
+          TextIO.writeFile (essayDraftPath createdPath) (maybe "" id mMarkdown)
+          loadWorkspaceEssay workspaceRoot segments)
+
     case content of
-      Nothing -> throwE (WorkspaceEssayCreationFailed "Unable to load created essay")
+      Nothing -> do
+        liftIO $ removeDirectoryRecursive path
+        throwE (WorkspaceEssayCreationFailed "Unable to load created essay")
       Just essay -> pure essay
 
   pure $ case result of

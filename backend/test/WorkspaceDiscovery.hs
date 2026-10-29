@@ -6,11 +6,11 @@ import Control.Exception (IOException, bracket, try)
 import Data.Text qualified as Text
 import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Persistence.Workspace
-  ( createWorkspaceDirectory, deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode
+  ( createWorkspaceDirectory, createWorkspaceEssay, deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode
   , loadWorkspaceEssay, saveWorkspaceEssay )
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryResult (..), WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
+  ( CreateWorkspaceDirectoryResult (..), CreateWorkspaceEssayResult (..), WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
   , WorkspaceNode (..), WorkspaceNodeType (..) )
 import System.Directory
   ( createDirectory, createDirectoryLink, createFileLink, getTemporaryDirectory
@@ -18,6 +18,7 @@ import System.Directory
   )
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
+import GHC.IO.Encoding (getLocaleEncoding, latin1, setLocaleEncoding)
 import Test.HUnit (Test (..), assertEqual, assertFailure)
 
 withWorkspace :: (FilePath -> WorkspaceRoot -> IO a) -> IO a
@@ -275,6 +276,56 @@ tests = TestLabel "essay directory discovery" $ TestList
           =<< createWorkspaceDirectory workspace ["Linked", "Parent"] "New"
         assertEqual "external destination was not created" False
           =<< doesPathExist (outside </> "Parent/New")
+  , TestLabel "failed prompt write removes the newly created essay" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        withLatin1 $ assertIOException $
+          createWorkspaceEssay workspace [] "New Essay" (Just "\x03bb") (Just "Draft")
+        assertEqual "prompt encoding failure leaves no partial directory" False
+          =<< doesPathExist (root </> "New Essay")
+  , TestLabel "failed draft write removes the directory and written prompt" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        withLatin1 $ assertIOException $
+          createWorkspaceEssay workspace [] "New Essay" (Just "ASCII assignment") (Just "\x03bb")
+        assertEqual "draft encoding failure removes the entire partial essay" False
+          =<< doesPathExist (root </> "New Essay")
+  , TestLabel "creation collisions never clean up existing destinations" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        writeFile (root </> "Existing File") "Keep file"
+        fileResult <- createWorkspaceEssay workspace [] "Existing File" Nothing Nothing
+        case fileResult of
+          WorkspaceEssayCreationFailed _ -> pure ()
+          other -> assertFailure ("expected file collision, got " <> show other)
+        assertEqual "existing file survives failed creation" "Keep file"
+          =<< readFile (root </> "Existing File")
+        createDirectory (root </> "Existing Folder")
+        writeFile (root </> "Existing Folder/reference.txt") "Keep reference"
+        assertEqual "ordinary directory collision"
+          WorkspaceEssayClobbersDirectory
+          =<< createWorkspaceEssay workspace [] "Existing Folder" Nothing Nothing
+        assertEqual "existing folder contents survive" "Keep reference"
+          =<< readFile (root </> "Existing Folder/reference.txt")
+        createDirectory (root </> "Existing Essay")
+        writeFile (root </> "Existing Essay/essay.md") "Keep draft"
+        writeFile (root </> "Existing Essay/prompt.md") "Keep assignment"
+        assertEqual "essay collision"
+          WorkspaceEssayAlreadyExists
+          =<< createWorkspaceEssay workspace [] "Existing Essay" (Just "Replacement") (Just "Replacement")
+        assertEqual "existing essay draft survives" "Keep draft"
+          =<< readFile (root </> "Existing Essay/essay.md")
+        assertEqual "existing essay prompt survives" "Keep assignment"
+          =<< readFile (root </> "Existing Essay/prompt.md")
+  , TestLabel "successful creation retains initial prompt and draft" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        let expected = WorkspaceEssayContent ["New Essay"] "New Essay" "Assignment" "Draft"
+        assertEqual "creation returns both saved fields"
+          (WorkspaceEssayCreated expected)
+          =<< createWorkspaceEssay workspace [] "New Essay" (Just "Assignment") (Just "Draft")
+        assertEqual "successful creation is reloadable" (Just expected)
+          =<< loadWorkspaceEssay workspace ["New Essay"]
+        assertEqual "prompt is retained on disk" "Assignment"
+          =<< readFile (root </> "New Essay/prompt.md")
+        assertEqual "draft is retained on disk" "Draft"
+          =<< readFile (root </> "New Essay/essay.md")
   , TestLabel "ordinary essay and folder deletion remain available" $ TestCase $
       withWorkspace $ \root workspace -> do
         createDirectory (root </> "History")
@@ -293,3 +344,11 @@ assertIOException action = do
   case result of
     Left _ -> pure ()
     Right () -> assertFailure "expected save to reject the filesystem target"
+
+-- TextIO.writeFile opens handles using the locale encoding. A lambda cannot be
+-- encoded in Latin-1, so it triggers an actual write failure after acquisition.
+-- HUnit runs these cases sequentially; always restore the process-wide encoding.
+withLatin1 :: IO a -> IO a
+withLatin1 action = bracket getLocaleEncoding setLocaleEncoding $ \_ -> do
+  setLocaleEncoding latin1
+  action
