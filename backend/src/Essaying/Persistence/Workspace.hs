@@ -238,21 +238,34 @@ createWorkspaceDirectory
   -> Text      -- ^ new directory name
   -> IO CreateWorkspaceDirectoryResult
 createWorkspaceDirectory workspaceRoot parentPath newDirName = do
-  let segments = parentPath <> [newDirName]
-      pathM = safeResolvePath workspaceRoot segments
-  case pathM of
-    Nothing -> return $ WorkspaceDirectoryCreationFailed "Invalid path"
-    Just path -> do
-      exists <- doesDirectoryExist path
-      if exists
-        then return WorkspaceDirectoryAlreadyExists
-        else do
-          debug 3 $ "Creating directory " <> show newDirName
-            <> " in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-            <> " path=" <> show path
-          createDirectory path
-          workspaceNode <- loadWorkspaceNode workspaceRoot segments
-          return $ WorkspaceDirectoryCreated $ fromJust workspaceNode
+  result <- runExceptT $ do
+    let newPath = parentPath <> [newDirName]
+
+    path <- resolveWorkspaceNodePath
+      (WorkspaceDirectoryCreationFailed "Invalid path") workspaceRoot newPath
+
+    doesParentExist <- liftIO $ doesDirectoryExist (takeDirectory path)
+    unless doesParentExist $ throwE $ WorkspaceDirectoryCreationFailed "Parent directory does not exist"
+
+    hasSymlink <- liftIO $ hasSymlinkInPath (takeDirectory path)
+    when hasSymlink $ throwE $ WorkspaceDirectoryCreationFailed "Path contains a symbolic link"
+
+    requireNonEssayParents (WorkspaceDirectoryCreationFailed "Path contains an essay directory") workspaceRoot parentPath
+
+    doesExist <- liftIO $ doesPathExist path
+    when doesExist $ throwE WorkspaceDirectoryAlreadyExists
+
+    liftIO $ debug 3 ("Creating directory " <> show newDirName
+                       <> " in workspace=" <> show (unWorkspaceRoot workspaceRoot)
+                       <> " path=" <> show path)
+
+    liftIO $ createDirectory path
+    liftIO $ loadWorkspaceNode workspaceRoot newPath
+
+  case result of
+    Left failure -> return failure
+    Right (Just workspaceNode) -> return $ WorkspaceDirectoryCreated workspaceNode
+    Right Nothing -> return $ WorkspaceDirectoryCreationFailed "Failed to load created workspace node"
 
 -- | Create a new essay directory under @parentPath@. If the essay already
 -- exists, return 'WorkspaceEssayAlreadyExists'.  When @markdown@ is

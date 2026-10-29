@@ -3,17 +3,18 @@
 module WorkspaceDiscovery (tests) where
 
 import Control.Exception (IOException, bracket, try)
+import Data.Text qualified as Text
 import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Persistence.Workspace
-  ( deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode
+  ( createWorkspaceDirectory, deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode
   , loadWorkspaceEssay, saveWorkspaceEssay )
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
+  ( CreateWorkspaceDirectoryResult (..), WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
   , WorkspaceNode (..), WorkspaceNodeType (..) )
 import System.Directory
   ( createDirectory, createDirectoryLink, createFileLink, getTemporaryDirectory
-  , pathIsSymbolicLink, removeFile, removePathForcibly
+  , doesPathExist, pathIsSymbolicLink, removeFile, removePathForcibly
   )
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
@@ -229,6 +230,51 @@ tests = TestLabel "essay directory discovery" $ TestList
           =<< readFile (outside </> "Essay/essay.md")
         assertEqual "ancestor link target prompt is unchanged" "Keep external prompt"
           =<< readFile (outside </> "Essay/prompt.md")
+  , TestLabel "folder creation rejects missing parents and unsafe names" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        assertEqual "missing parent is reported"
+          (WorkspaceDirectoryCreationFailed "Parent directory does not exist")
+          =<< createWorkspaceDirectory workspace ["Missing"] "Child"
+        assertEqual "missing parent was not implicitly created" False
+          =<< doesPathExist (root </> "Missing")
+        mapM_ (\name -> assertEqual "unsafe destination is rejected"
+          (WorkspaceDirectoryCreationFailed "Invalid path")
+          =<< createWorkspaceDirectory workspace [] name) ["", ".", "..", "A/B", "A\\B"]
+  , TestLabel "folder creation rejects file and essay destination collisions" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        writeFile (root </> "Existing") "Keep file"
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay/essay.md") "Keep draft"
+        mapM_ (\name -> assertEqual "existing destination is a collision"
+          WorkspaceDirectoryAlreadyExists
+          =<< createWorkspaceDirectory workspace [] name) ["Existing", "Essay"]
+        assertEqual "colliding file remains unchanged" "Keep file"
+          =<< readFile (root </> "Existing")
+        assertEqual "colliding essay remains unchanged" "Keep draft"
+          =<< readFile (root </> "Essay/essay.md")
+  , TestLabel "folder creation rejects immediate and earlier essay parents" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay/essay.md") "Keep draft"
+        createDirectory (root </> "Essay/References")
+        mapM_ (\parents -> do
+          assertEqual "essay ancestor is rejected"
+            (WorkspaceDirectoryCreationFailed "Path contains an essay directory")
+            =<< createWorkspaceDirectory workspace parents "New"
+          assertEqual "no child folder was created" False
+            =<< doesPathExist (foldl (</>) root (map Text.unpack parents) </> "New"))
+          [["Essay"], ["Essay", "References"]]
+        assertEqual "ancestor draft is unchanged" "Keep draft"
+          =<< readFile (root </> "Essay/essay.md")
+  , TestLabel "folder creation rejects linked parents without writing outside" $ TestCase $
+      withWorkspace $ \root workspace -> withWorkspace $ \outside _ -> do
+        createDirectory (outside </> "Parent")
+        createDirectoryLink outside (root </> "Linked")
+        assertEqual "linked ancestor is rejected"
+          (WorkspaceDirectoryCreationFailed "Path contains a symbolic link")
+          =<< createWorkspaceDirectory workspace ["Linked", "Parent"] "New"
+        assertEqual "external destination was not created" False
+          =<< doesPathExist (outside </> "Parent/New")
   , TestLabel "ordinary essay and folder deletion remain available" $ TestCase $
       withWorkspace $ \root workspace -> do
         createDirectory (root </> "History")
