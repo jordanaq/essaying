@@ -100,8 +100,10 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
       }
 
       if (routePath === "workspace/essays" && request.method() === "POST") {
-        const body = request.postDataJSON() as { parentPath: string[]; essayName: string; markdown: string | null };
-        const essayPath = [...body.parentPath, `${body.essayName}.md`];
+        const body = request.postDataJSON() as { parentPath: string[]; essayName: string; markdown: string; prompt: string };
+        expect(body.markdown).toBe("");
+        expect(body.prompt).toBe("");
+        const essayPath = [...body.parentPath, body.essayName];
         workspaceTree = insertNode(workspaceTree, body.parentPath, {
           name: body.essayName,
           path: essayPath,
@@ -110,7 +112,7 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
         });
         await route.fulfill({
           status: 201,
-          json: { path: essayPath, title: body.essayName, markdown: body.markdown ?? "" }
+          json: { path: essayPath, title: body.essayName, prompt: "", markdown: body.markdown ?? "" }
         });
         return;
       }
@@ -150,11 +152,12 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
     const essayResponse = await createEssayResponse;
     expect(essayResponse.ok()).toBe(true);
     expect(await essayResponse.json()).toMatchObject({
-      path: [folderName, `${essayName}.md`],
+      path: [folderName, `${essayName}`],
       title: essayName
     });
-    const essayRow = page.locator(`sl-tree-item[data-path='["${folderName}","${essayName}.md"]']`);
+    const essayRow = page.locator(`sl-tree-item[data-path='["${folderName}","${essayName}"]']`);
     await expect(essayRow).toBeVisible();
+    await expect(essayRow.locator('sl-icon-button[title^="Create"]')).toHaveCount(0);
     await essayRow.hover();
 
     const deleteEssayResponse = page.waitForResponse((response) =>
@@ -162,10 +165,11 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
     );
     await essayRow.locator(`sl-icon-button[title="Delete essay ${essayName}"]`).click();
     await expect(page.getByText(`Delete ${essayName}? This cannot be undone.`)).toBeVisible();
+    await expect(page.getByText(/This permanently deletes the essay, assignment prompt/)).toBeVisible();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     const essayDelete = await deleteEssayResponse;
     expect(essayDelete.status()).toBe(204);
-    expect(new URL(essayDelete.url()).pathname).toContain(`/workspace/essays/${folderName}/${essayName}.md`);
+    expect(new URL(essayDelete.url()).pathname).toContain(`/workspace/essays/${folderName}/${essayName}`);
     await expect(essayRow).toHaveCount(0);
 
     const createNestedEssayResponse = page.waitForResponse((response) =>

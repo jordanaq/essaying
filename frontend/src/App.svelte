@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import ContextPanel from "./ContextPanel.svelte";
   import { createContextPreview, contextSelection } from "./context-preview";
   import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
@@ -46,6 +46,7 @@
     path: string[];
     title: string;
     markdown: string;
+    prompt: string;
   };
 
   type CreateWorkspaceDirectoryRequest = {
@@ -56,12 +57,11 @@
   type CreateWorkspaceEssayRequest = {
     parentPath: string[];
     essayName: string;
-    markdown: string | null;
+    markdown: string;
+    prompt: string;
   };
 
-  type SaveWorkspaceEssayRequest = {
-    markdown: string;
-  };
+  type SaveWorkspaceEssayRequest = { markdown: string } | { prompt: string };
 
   type UiLogLevel = "info" | "warn" | "error";
   const uiLoggingEnabled = import.meta.env.MODE !== "test";
@@ -72,7 +72,26 @@
   let workspaceError = "";
   let selectedWorkspaceDirectoryPath: string[] = [];
   let selectedWorkspaceEssay: WorkspaceEssayContent | null = null;
-  let markdown = "# Essay Draft\n\nWrite your introduction here.";
+  let markdown = "";
+  let prompt = "";
+  let savingPrompt = false;
+  let essayLoading = false;
+  let loadingEssayPath: string[] | null = null;
+  let contextDirty = false;
+  let contextBusy = false;
+  let contextPanel: { discardChanges: () => void } | undefined;
+  let draftError = "";
+  let promptError = "";
+  let draftNotice = "";
+  let promptNotice = "";
+  let essayController: AbortController | undefined;
+  let workspaceController: AbortController | undefined;
+  let essayRevision = 0;
+  $: draftDirty = selectedWorkspaceEssay !== null && markdown !== selectedWorkspaceEssay.markdown;
+  $: promptDirty = selectedWorkspaceEssay !== null && prompt !== selectedWorkspaceEssay.prompt;
+  $: hasUnsavedChanges = draftDirty || promptDirty || contextDirty;
+  $: operationPending = savingDraft || savingPrompt || contextBusy || workspaceCreateBusy || workspaceDeleteBusy;
+  $: canGrade = contextReady && !hasUnsavedChanges && !operationPending && !essayLoading;
   let model = "llama3.1:8b";
   let accounts: AccountProfile[] = [];
   let loadingAccounts = false;
@@ -215,31 +234,86 @@
     }
   }
 
+  onDestroy(() => {
+    essayController?.abort();
+    workspaceController?.abort();
+    contextPreview.cancel();
+  });
+
+  function confirmNavigation() {
+    if (operationPending) {
+      status = "Wait for the current save or workspace change to finish.";
+      return false;
+    }
+    if (!hasUnsavedChanges) return true;
+    if (!window.confirm("Discard unsaved draft, prompt, or context changes?")) return false;
+    if (contextDirty) contextPanel?.discardChanges();
+    return true;
+  }
+
+  function handleBeforeUnload(event: BeforeUnloadEvent) {
+    if (hasUnsavedChanges || operationPending) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  }
+
+  function invalidateEssayLoad() {
+    essayRevision += 1;
+    essayController?.abort();
+    essayLoading = false;
+    loadingEssayPath = null;
+    contextPreview.cancel();
+  }
+
+  function setLoadedEssay(essay: WorkspaceEssayContent) {
+    selectedWorkspaceEssay = essay;
+    selectedWorkspaceDirectoryPath = essay.path.slice(0, -1);
+    markdown = essay.markdown;
+    prompt = essay.prompt;
+    draftError = promptError = draftNotice = promptNotice = "";
+    gradeStream = "";
+  }
+
+  function reloadWorkspace() {
+    if (activeAccountId && confirmNavigation()) void loadWorkspace(activeAccountId);
+  }
+
   function resetWorkspaceState() {
+    invalidateEssayLoad();
+    workspaceController?.abort();
+    prompt = "";
+    contextDirty = contextBusy = false;
+    draftError = promptError = draftNotice = promptNotice = "";
     workspaceTree = [];
     expandedWorkspaceDirectories = [];
     workspaceLoading = false;
     workspaceError = "";
     selectedWorkspaceDirectoryPath = [];
     selectedWorkspaceEssay = null;
-    markdown = "# Essay Draft\n\nWrite your introduction here.";
+    markdown = "";
     workspaceCreateKind = null;
     workspaceCreateName = "";
     workspaceDeleteTarget = null;
   }
 
   async function loadWorkspace(accountId: string) {
+    workspaceController?.abort();
+    invalidateEssayLoad();
+    const controller = new AbortController();
+    workspaceController = controller;
     workspaceLoading = true;
     workspaceError = "";
     uiLog("info", "Loading workspace", { accountId });
 
     try {
-      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace`);
+      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace`, { signal: controller.signal });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data: WorkspaceTreeResponse = await res.json();
+      if (controller.signal.aborted || activeAccountId !== accountId) return;
       workspaceTree = data.tree;
 
       const preferredPath =
@@ -258,38 +332,47 @@
 
       uiLog("info", "Workspace loaded", { accountId, rootCount: data.tree.length });
     } catch (err) {
+      if (controller.signal.aborted || activeAccountId !== accountId) return;
       workspaceError = `Could not load workspace: ${String(err)}`;
       workspaceTree = [];
       selectedWorkspaceEssay = null;
       selectedWorkspaceDirectoryPath = [];
       uiLog("error", "Failed to load workspace", err);
     } finally {
-      workspaceLoading = false;
+      if (!controller.signal.aborted && activeAccountId === accountId) workspaceLoading = false;
     }
   }
 
   async function loadWorkspaceEssay(accountId: string, essayPath: string[], shouldLog = true) {
-    contextPreview.cancel();
+    invalidateEssayLoad();
+    const controller = new AbortController();
+    essayController = controller;
+    const revision = essayRevision;
+    essayLoading = true;
+    loadingEssayPath = essayPath;
+    workspaceError = "";
     const encodedPath = essayPath.map((segment) => encodeURIComponent(segment)).join("/");
     if (shouldLog) {
       uiLog("info", "Loading essay", { accountId, essayPath });
     }
 
     try {
-      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace/essays/${encodedPath}`);
+      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace/essays/${encodedPath}`, { signal: controller.signal });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
 
       const data: WorkspaceEssayContent = await res.json();
-      selectedWorkspaceEssay = data;
-      selectedWorkspaceDirectoryPath = data.path.slice(0, -1);
-      markdown = data.markdown;
+      if (controller.signal.aborted || revision !== essayRevision || accountId !== activeAccountId) return;
+      setLoadedEssay(data);
       status = `Loaded ${data.title}`;
       uiLog("info", "Essay loaded", { accountId, essayPath: data.path });
     } catch (err) {
+      if (controller.signal.aborted || revision !== essayRevision || accountId !== activeAccountId) return;
       workspaceError = `Could not load essay: ${String(err)}`;
       uiLog("error", "Failed to load essay", err);
+    } finally {
+      if (!controller.signal.aborted && revision === essayRevision) { essayLoading = false; loadingEssayPath = null; }
     }
   }
 
@@ -328,6 +411,9 @@
       const created: WorkspaceNode = await res.json();
       workspaceTree = insertWorkspaceNode(workspaceTree, body.parentPath, created);
       expandWorkspaceDirectory(body.parentPath);
+      invalidateEssayLoad();
+      selectedWorkspaceEssay = null;
+      markdown = prompt = "";
       selectedWorkspaceDirectoryPath = created.path;
       status = `Created folder ${created.name}`;
       uiLog("info", "Workspace directory created", { path: created.path });
@@ -353,7 +439,8 @@
     const body: CreateWorkspaceEssayRequest = {
       parentPath,
       essayName,
-      markdown: markdown.trim() ? markdown : null
+      markdown: "",
+      prompt: ""
     };
 
     workspaceError = "";
@@ -374,9 +461,8 @@
 
       const created: WorkspaceEssayContent = await res.json();
       expandWorkspaceDirectory(body.parentPath);
-      selectedWorkspaceEssay = created;
-      selectedWorkspaceDirectoryPath = created.path.slice(0, -1);
-      markdown = created.markdown;
+      invalidateEssayLoad();
+      setLoadedEssay(created);
       workspaceTree = insertWorkspaceNode(workspaceTree, body.parentPath, {
         name: created.title,
         path: created.path,
@@ -406,6 +492,7 @@
   }
 
   async function submitWorkspaceCreate() {
+    if (!confirmNavigation()) return;
     workspaceCreateBusy = true;
     const created = workspaceCreateKind === "folder"
       ? await createWorkspaceDirectory(workspaceCreateParentPath, workspaceCreateName)
@@ -425,6 +512,7 @@
       return;
     }
 
+    if (!confirmNavigation()) return;
     const target = workspaceDeleteTarget;
     const resource = isDirectoryNode(target) ? "directories" : "essays";
     const encodedPath = target.path.map(encodeURIComponent).join("/");
@@ -453,6 +541,8 @@
   }
 
   function loginAs(accountId: string) {
+    if (!confirmNavigation()) return;
+    resetWorkspaceState();
     uiLog("info", "Logging in", { accountId });
     activeAccountId = accountId;
     localStorage.setItem("essay-account-id", accountId);
@@ -460,6 +550,7 @@
   }
 
   function logout() {
+    if (!confirmNavigation()) return;
     uiLog("info", "Logging out", { accountId: activeAccountId });
     activeAccountId = null;
     localStorage.removeItem("essay-account-id");
@@ -554,7 +645,7 @@
   }
 
   function mockGrade() {
-    if (!contextReady) return;
+    if (!canGrade) return;
     status = "Streaming grading preview";
     const chunks = [
       "Clarity: strong structure. ",
@@ -568,42 +659,43 @@
     }
   }
 
-  async function saveDraft() {
-    if (!activeAccountId || selectedWorkspaceEssay === null) {
-      workspaceError = "Select a persisted essay before saving.";
-      return;
-    }
-
+  async function saveEssayField(field: "markdown" | "prompt") {
+    if (!activeAccountId || !selectedWorkspaceEssay || essayLoading) return;
+    if (field === "markdown" ? savingDraft : savingPrompt) return;
+    const accountId = activeAccountId;
     const essayPath = selectedWorkspaceEssay.path;
-    const encodedPath = essayPath.map((segment) => encodeURIComponent(segment)).join("/");
-    const body: SaveWorkspaceEssayRequest = { markdown };
-    savingDraft = true;
-    workspaceError = "";
-    uiLog("info", "Saving essay", { accountId: activeAccountId, essayPath });
-
+    const revision = essayRevision;
+    const value = field === "markdown" ? markdown : prompt;
+    const body: SaveWorkspaceEssayRequest = field === "markdown" ? { markdown: value } : { prompt: value };
+    if (field === "markdown") { savingDraft = true; draftError = draftNotice = ""; }
+    else { savingPrompt = true; promptError = promptNotice = ""; }
     try {
-      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(activeAccountId)}/workspace/essays/${encodedPath}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
+      const encodedPath = essayPath.map(encodeURIComponent).join("/");
+      const res = await fetch(`/api/v1/accounts/${encodeURIComponent(accountId)}/workspace/essays/${encodedPath}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
-
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+        let message = await res.text();
+        try { message = JSON.parse(message).error?.message ?? message; } catch { /* Plain HTTP error. */ }
+        throw new Error(message || `HTTP ${res.status}`);
       }
-
       const saved: WorkspaceEssayContent = await res.json();
-      selectedWorkspaceEssay = saved;
-      markdown = saved.markdown;
-      status = `Draft saved for ${pathToLabel(saved.path)}`;
-      uiLog("info", "Essay saved", { accountId: activeAccountId, essayPath: saved.path });
+      if (accountId !== activeAccountId || revision !== essayRevision || !selectedWorkspaceEssay
+          || !samePath(essayPath, selectedWorkspaceEssay.path)) return;
+      // Only update the saved baseline for this field. A response may contain
+      // older sibling content, and typing may continue while this request runs.
+      selectedWorkspaceEssay = { ...selectedWorkspaceEssay, [field]: saved[field] };
+      if (field === "markdown") draftNotice = "Draft saved.";
+      else promptNotice = "Prompt saved.";
+      status = `${field === "markdown" ? "Draft" : "Prompt"} saved for ${pathToLabel(essayPath)}`;
     } catch (err) {
-      workspaceError = `Could not save essay: ${String(err)}`;
-      uiLog("error", "Failed to save essay", err);
+      if (accountId !== activeAccountId || revision !== essayRevision) return;
+      const message = `Could not save ${field === "markdown" ? "draft" : "prompt"}: ${String(err)}`;
+      if (field === "markdown") draftError = message;
+      else promptError = message;
     } finally {
-      savingDraft = false;
+      if (field === "markdown") savingDraft = false;
+      else savingPrompt = false;
     }
   }
 
@@ -613,6 +705,7 @@
 
   function handleMarkdownInput(e: Event) {
     markdown = (e.target as { value?: string }).value ?? markdown;
+    draftNotice = "";
   }
 
   function togglePanel(panel: keyof typeof panelState) {
@@ -683,17 +776,26 @@
   }
 
   function selectWorkspaceNode(node: WorkspaceNode) {
+    if (selectedWorkspaceEssay && samePath(node.path, selectedWorkspaceEssay.path)) return true;
+    if (!confirmNavigation()) return false;
     if (isDirectoryNode(node)) {
+      invalidateEssayLoad();
       selectedWorkspaceDirectoryPath = node.path;
       selectedWorkspaceEssay = null;
+      markdown = prompt = "";
     } else if (activeAccountId) {
       void loadWorkspaceEssay(activeAccountId, node.path);
     }
+    return true;
   }
 
   function selectWorkspaceRoot() {
+    if (!confirmNavigation()) return false;
+    invalidateEssayLoad();
     selectedWorkspaceDirectoryPath = [];
     selectedWorkspaceEssay = null;
+    markdown = prompt = "";
+    return true;
   }
 
   function samePath(left: string[], right: string[]) {
@@ -757,6 +859,8 @@
     });
   }
 </script>
+
+<svelte:window on:beforeunload={handleBeforeUnload} />
 
 <main>
   {#if !activeAccount}
@@ -884,7 +988,7 @@
             label="Reload workspace"
             title="Reload workspace"
             disabled={workspaceLoading}
-            on:click={() => activeAccountId && void loadWorkspace(activeAccountId)}
+            on:click={reloadWorkspace}
           ></sl-icon-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-icon-button
@@ -908,7 +1012,7 @@
           {/if}
           <WorkspaceTree
             nodes={workspaceTree}
-            selectedPath={selectedWorkspaceEssay?.path ?? selectedWorkspaceDirectoryPath}
+            selectedPath={loadingEssayPath ?? selectedWorkspaceEssay?.path ?? selectedWorkspaceDirectoryPath}
             expandedPaths={expandedWorkspaceDirectories}
             onSelect={selectWorkspaceNode}
             onSelectRoot={selectWorkspaceRoot}
@@ -961,6 +1065,8 @@
       </p>
       {#if workspaceDeleteTarget && isDirectoryNode(workspaceDeleteTarget)}
         <p class="create-dialog-location">This also permanently deletes everything inside the folder.</p>
+      {:else}
+        <p class="create-dialog-location">This permanently deletes the essay, assignment prompt, context settings, and any other files in this essay.</p>
       {/if}
       {#if workspaceError}
         <p class="login-error">{workspaceError}</p>
@@ -1011,23 +1117,48 @@
             <sl-option value="mistral:7b">mistral:7b</sl-option>
           </sl-select>
 
+          <section class="assignment-editor" aria-label="Assignment prompt editor">
+            <sl-textarea label="Assignment prompt" rows="5" value={prompt}
+              disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
+              on:sl-input={(event: Event) => { prompt = (event.target as { value?: string }).value ?? prompt; promptNotice = ""; }}
+              placeholder="Describe the assignment, question, or requirements."></sl-textarea>
+            <div class="editor-actions">
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <sl-button variant="default" on:click={() => saveEssayField("prompt")}
+                disabled={savingPrompt || essayLoading || !selectedWorkspaceEssay}>
+                {savingPrompt ? "Saving prompt…" : "Save Prompt"}
+              </sl-button>
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+              <sl-button variant="text" disabled={!promptDirty || savingPrompt}
+                on:click={() => { prompt = selectedWorkspaceEssay?.prompt ?? ""; promptError = promptNotice = ""; }}>Discard prompt changes</sl-button>
+              <span class="footer-note" role="status">{promptDirty ? "Unsaved prompt changes" : promptNotice || (selectedWorkspaceEssay ? "Prompt saved" : "Select an essay")}</span>
+            </div>
+            {#if promptError}<p class="login-error" role="alert">{promptError}</p>{/if}
+          </section>
           <sl-textarea
             label="Essay Markdown"
             rows="18"
             value={markdown}
+            disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
             on:sl-input={handleMarkdownInput}
           ></sl-textarea>
         </div>
 
         <div class="editor-actions">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="primary" on:click={saveDraft} disabled={savingDraft || selectedWorkspaceEssay === null}>
+          <sl-button variant="primary" on:click={() => saveEssayField("markdown")} disabled={savingDraft || essayLoading || selectedWorkspaceEssay === null}>
             {savingDraft ? "Saving..." : "Save Draft"}
           </sl-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="default" on:click={mockGrade} disabled={!contextReady} aria-describedby={contextReady ? undefined : "grade-context-status"}>Grade (mock stream)</sl-button>
+          <sl-button variant="text" disabled={!draftDirty || savingDraft}
+            on:click={() => { markdown = selectedWorkspaceEssay?.markdown ?? ""; draftError = draftNotice = ""; }}>Discard draft changes</sl-button>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <sl-button variant="default" on:click={mockGrade} disabled={!canGrade} aria-describedby={canGrade ? undefined : "grade-context-status"}>Grade (mock stream)</sl-button>
         </div>
-        {#if !contextReady}<p id="grade-context-status" class="footer-note" role="status">{contextUnavailable}</p>{/if}
+        {#if draftError}<p class="login-error" role="alert">{draftError}</p>{/if}
+        {#if selectedWorkspaceEssay}<p class="footer-note" role="status">{draftDirty ? "Unsaved draft changes" : draftNotice || "Draft saved"}</p>{/if}
+        {#if essayLoading}<p class="footer-note" role="status">Loading essay…</p>{/if}
+        {#if !canGrade}<p id="grade-context-status" class="footer-note" role="status">{hasUnsavedChanges ? "Save or discard your changes before grading." : contextUnavailable}</p>{/if}
         {#if selectedWorkspaceEssay}
           <p class="footer-note">Currently editing {pathToLabel(selectedWorkspaceEssay.path)}.</p>
         {:else}
@@ -1064,14 +1195,19 @@
 
       <div hidden={!panelState.feedback}>
         <div id="context-tabpanel" role="tabpanel" aria-labelledby="context-tab" tabindex="0" hidden={activeFeedbackTab !== "context"}>
+          <fieldset class="context-navigation-guard" disabled={essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}>
           {#key activeAccountId}
             <ContextPanel
+              bind:this={contextPanel}
               preview={contextPreview}
               accountId={activeAccount.accountId.unAccountId}
-              directoryPath={selectedWorkspaceDirectoryPath}
+              directoryPath={selectedWorkspaceEssay?.path ?? selectedWorkspaceDirectoryPath}
+              bind:dirty={contextDirty}
+              bind:busy={contextBusy}
               essayPath={selectedWorkspaceEssay?.path ?? null}
             />
           {/key}
+          </fieldset>
         </div>
         <div id="feedback-tabpanel" role="tabpanel" aria-labelledby="feedback-tab" tabindex="0" hidden={activeFeedbackTab !== "feedback"}>
           <sl-input label="Backend status" value={backendMessage} readonly></sl-input>

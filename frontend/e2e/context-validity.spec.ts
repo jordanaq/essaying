@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("context validity gates grading while editing, saving, and collapsed-panel recovery remain usable", async ({ page }) => {
   const context = { title: "Saved settings", audience: null, model: null, tags: [], instructions: [], grading_directions: [], rubric: {} };
-  const essays = ["first.md", "second.md"].map((name) => ({ path: [name], title: name, markdown: `# ${name}` }));
+  const essays = ["First Essay", "Second Essay"].map((name) => ({ path: [name], title: name, prompt: "", markdown: `# ${name}` }));
   let firstReads = 0;
   let repaired = false;
   let savedMarkdown: string | undefined;
@@ -17,7 +17,7 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
     } else if (url.pathname.endsWith("/workspace")) {
       await route.fulfill({ json: { tree: essays.map((essay) => ({ name: essay.title, path: essay.path, nodeType: "WorkspaceEssayNode", children: [] })) } });
     } else if (url.pathname.endsWith("/context/effective")) {
-      if (url.searchParams.get("path") === "first.md") {
+      if (url.searchParams.get("path") === "First Essay") {
         firstReads += 1;
         if (firstReads === 1) releaseInitial = () => route.fulfill({ json: context });
         else releaseStale = () => route.fulfill({ json: { ...context, title: "Stale first essay" } });
@@ -28,7 +28,7 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
     } else if (url.pathname.endsWith("/context")) {
       await route.fulfill({ status: 404, json: { error: { message: "Context does not exist." } } });
     } else {
-      const essay = essays.find((item) => url.pathname.endsWith(`/essays/${item.title}`));
+      const essay = essays.find((item) => decodeURIComponent(url.pathname).endsWith(`/essays/${item.title}`));
       if (essay) {
         if (request.method() === "PUT") savedMarkdown = request.postDataJSON().markdown;
         await route.fulfill({ json: { ...essay, markdown: savedMarkdown ?? essay.markdown } });
@@ -50,8 +50,8 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
   await expect(grade).toHaveJSProperty("disabled", true);
   const feedbackPanel = page.locator("sl-card").filter({ has: page.getByRole("tablist", { name: "Context and feedback" }) });
   await feedbackPanel.locator("sl-button").filter({ hasText: "Collapse" }).click();
-  await page.locator('.tree-item-name[title="second.md"]').click();
-  await expect(page.getByText("Currently editing second.md.", { exact: true })).toBeVisible();
+  await page.locator('.tree-item-name[title="Second Essay"]').click();
+  await expect(page.getByText("Currently editing Second Essay.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Grading is unavailable/)).toBeVisible();
   await releaseStale!();
   await expect(grade).toHaveJSProperty("disabled", true);
@@ -60,7 +60,7 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
   await editor.fill("# Still editable with broken context");
   await page.getByText("Save Draft", { exact: true }).click();
   await expect.poll(() => savedMarkdown).toBe("# Still editable with broken context");
-  await expect(page.getByText("Draft saved for second.md", { exact: true })).toBeVisible();
+  await expect(page.getByText("Draft saved for Second Essay", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Expand context and feedback" }).click();
   await expect(page.getByRole("alert")).toHaveText("Invalid ancestor context.");
   repaired = true;

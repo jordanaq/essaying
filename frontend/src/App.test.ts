@@ -75,6 +75,7 @@ describe("App account login flow", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
   it("shows login gate with available accounts when logged out", async () => {
@@ -138,8 +139,8 @@ describe("App account login flow", () => {
                 nodeType: "WorkspaceDirectoryNode",
                 children: [
                   {
-                    name: "notes.md",
-                    path: ["History", "French Revolution", "notes.md"],
+                    name: "Notes",
+                    path: ["History", "French Revolution", "Notes"],
                     nodeType: "WorkspaceEssayNode",
                     children: []
                   }
@@ -150,14 +151,14 @@ describe("App account login flow", () => {
         ]
       }),
       jsonResponse(200, {
-        path: ["History", "French Revolution", "notes.md"],
-        title: "notes.md",
-        markdown: "# Notes"
+        path: ["History", "French Revolution", "Notes"],
+        title: "Notes",
+        prompt: "", markdown: "# Notes"
       }),
       jsonResponse(200, {
-        path: ["History", "French Revolution", "notes.md"],
-        title: "notes.md",
-        markdown: "# Updated notes"
+        path: ["History", "French Revolution", "Notes"],
+        title: "Notes",
+        prompt: "", markdown: "# Updated notes"
       })
     ]);
 
@@ -170,7 +171,7 @@ describe("App account login flow", () => {
       return item as HTMLElement;
     });
     const essayItem = container.querySelector(
-      'sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\",\\"notes.md\\"]"]'
+      'sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\",\\"Notes\\"]"]'
     );
     expect(essayItem).not.toBeNull();
     expect(historyItem).toHaveAttribute("expanded");
@@ -179,7 +180,7 @@ describe("App account login flow", () => {
       container.querySelector('sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\"]"]')
     );
 
-    const editor = container.querySelector("sl-textarea") as (HTMLElement & { value: string }) | null;
+    const editor = Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string; updateComplete: Promise<boolean> }>("sl-textarea")).find((element) => element.label === "Essay Markdown") as (HTMLElement & { value: string }) | null;
     if (!editor) {
       throw new Error("Essay editor not found");
     }
@@ -190,18 +191,18 @@ describe("App account login flow", () => {
     await waitFor(() => {
       const saveCall = apiCalls(fetchMock).find(([input, init]) => {
         const url = typeof input === "string" ? input : input.toString();
-        return url.endsWith("/workspace/essays/History/French%20Revolution/notes.md") && init?.method === "PUT";
+        return url.endsWith("/workspace/essays/History/French%20Revolution/Notes") && init?.method === "PUT";
       });
       expect(saveCall).toBeDefined();
       expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ markdown: "# Updated notes" });
     });
-    expect(await screen.findByText("Draft saved for History/French Revolution/notes.md")).toBeInTheDocument();
+    expect(await screen.findByText("Draft saved for History/French Revolution/Notes")).toBeInTheDocument();
   });
 
   it.each(["mrroww", ""])("clears the editor after loading and editing an essay starting with %j", async (initialMarkdown) => {
     localStorage.setItem("essay-account-id", "alice");
-    const populatedPath = ["meow", "meoww.md"];
-    const emptyPath = ["meow", "meow in", "essay.md"];
+    const populatedPath = ["meow", "meoww"];
+    const emptyPath = ["meow", "meow in", "Empty Essay"];
     const fetchMock = createApiAwareFetchMock([
       jsonResponse(200, [
         { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: null }
@@ -210,22 +211,22 @@ describe("App account login flow", () => {
         tree: [{
           name: "meow", path: ["meow"], nodeType: "WorkspaceDirectoryNode",
           children: [
-            { name: "meoww.md", path: populatedPath, nodeType: "WorkspaceEssayNode", children: [] },
+            { name: "meoww", path: populatedPath, nodeType: "WorkspaceEssayNode", children: [] },
             {
               name: "meow in", path: ["meow", "meow in"], nodeType: "WorkspaceDirectoryNode",
-              children: [{ name: "essay.md", path: emptyPath, nodeType: "WorkspaceEssayNode", children: [] }]
+              children: [{ name: "Empty Essay", path: emptyPath, nodeType: "WorkspaceEssayNode", children: [] }]
             }
           ]
         }]
       }),
-      jsonResponse(200, { path: populatedPath, title: "meoww", markdown: initialMarkdown }),
-      jsonResponse(200, { path: emptyPath, title: "essay", markdown: "" }),
-      jsonResponse(200, { path: emptyPath, title: "essay", markdown: "" })
+      jsonResponse(200, { path: populatedPath, title: "meoww", prompt: "", markdown: initialMarkdown }),
+      jsonResponse(200, { path: emptyPath, title: "Empty Essay", prompt: "", markdown: "" }),
+      jsonResponse(200, { path: emptyPath, title: "Empty Essay", prompt: "", markdown: "" })
     ]);
     vi.stubGlobal("fetch", fetchMock);
     const { container } = render(App);
     const editor = await waitFor(() => {
-      const element = container.querySelector("sl-textarea") as
+      const element = Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string; updateComplete: Promise<boolean> }>("sl-textarea")).find((element) => element.label === "Essay Markdown") as
         (HTMLElement & { value: string; updateComplete: Promise<boolean> }) | null;
       expect(element?.value).toBe(initialMarkdown);
       return element!;
@@ -243,7 +244,7 @@ describe("App account login flow", () => {
       detail: { selection: [emptyItem] }, bubbles: true
     }));
 
-    await screen.findByText("Currently editing meow/meow in/essay.md.");
+    await screen.findByText("Currently editing meow/meow in/Empty Essay.");
     await waitFor(() => expect(editor.value).toBe(""));
     await editor.updateComplete;
     expect(editor.shadowRoot?.querySelector("textarea")).toHaveValue("");
@@ -251,7 +252,7 @@ describe("App account login flow", () => {
     await fireEvent.click(screen.getByText("Save Draft"));
     await waitFor(() => {
       const saveCall = apiCalls(fetchMock).find(([, init]) => init?.method === "PUT");
-      expect(saveCall?.[0]).toBe("/api/v1/accounts/alice/workspace/essays/meow/meow%20in/essay.md");
+      expect(saveCall?.[0]).toBe("/api/v1/accounts/alice/workspace/essays/meow/meow%20in/Empty%20Essay");
       expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ markdown: "" });
     });
   });

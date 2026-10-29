@@ -20,12 +20,12 @@
   export let nodes: WorkspaceNode[] = [];
   export let selectedPath: string[] = [];
   export let expandedPaths: string[][] = [];
-  export let onSelect: (node: WorkspaceNode) => void;
-  export let onSelectRoot: () => void;
+  export let onSelect: (node: WorkspaceNode) => boolean | void;
+  export let onSelectRoot: () => boolean | void;
   export let onExpansionChange: (path: string[], expanded: boolean) => void;
   export let onCreateDirectory: (path: string[]) => void;
   export let onCreateEssay: (path: string[]) => void;
-  export let onDelete: (node: WorkspaceNode) => void;
+  export let onDelete: (node: WorkspaceNode) => boolean | void;
   export let isRoot = true;
 
   function samePath(left: string[], right: string[]) {
@@ -78,6 +78,14 @@
     return null;
   }
 
+  function restoreSelection() {
+    queueMicrotask(() => {
+      for (const item of document.querySelectorAll<HTMLElement & { selected: boolean }>("sl-tree-item[data-path]")) {
+        item.selected = samePath(JSON.parse(item.dataset.path ?? "[]"), selectedPath);
+      }
+    });
+  }
+
   function handleSelectionChange(event: Event) {
     const selectedItems = (event as CustomEvent<{ selection: Array<HTMLElement & { dataset: DOMStringMap }> }>)
       .detail.selection;
@@ -88,20 +96,20 @@
 
     const path = JSON.parse(selectedItem.dataset.path) as string[];
     if (path.length === 0) {
-      onSelectRoot();
+      if (onSelectRoot() === false) restoreSelection();
       return;
     }
 
     const node = findNode(path);
     if (node) {
-      onSelect(node);
+      if (onSelect(node) === false) restoreSelection();
     }
   }
 </script>
 
 {#if isRoot}
   <sl-tree selection="single" on:sl-selection-change={handleSelectionChange}>
-    <sl-tree-item class="workspace-root" data-path="[]" expanded>
+    <sl-tree-item class="workspace-root" data-path="[]" selected={selectedPath.length === 0} expanded>
       <span class="tree-item-content">
         <span class="folder-icon" aria-hidden="true"></span>
         <span class="tree-item-name" title="Workspace">Workspace</span>

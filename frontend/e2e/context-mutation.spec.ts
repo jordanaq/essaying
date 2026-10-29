@@ -3,7 +3,7 @@ import { expect, test, type Route } from "@playwright/test";
 for (const operation of ["save", "delete"] as const) {
   for (const succeeds of [true, false]) {
     test(`grading waits for context ${operation} ${succeeds ? "success" : "failure"} and subsequent resolution`, async ({ page }) => {
-      const essay = { path: ["draft.md"], title: "draft.md", markdown: "# Draft" };
+      const essay = { path: ["Draft"], title: "Draft", prompt: "", markdown: "# Draft" };
       const initialLayer = { title: { tag: "SetScalar", contents: "Saved title" } };
       const effective = { title: "Saved title", audience: null, model: null, tags: [], instructions: [], grading_directions: [], rubric: {} };
       let mutation: Route | undefined;
@@ -24,7 +24,7 @@ for (const operation of ["save", "delete"] as const) {
         } else if (url.pathname.endsWith("/context")) {
           if (request.method() === "GET") await route.fulfill({ json: initialLayer });
           else mutation = route;
-        } else if (url.pathname.endsWith("/essays/draft.md")) {
+        } else if (decodeURIComponent(url.pathname).endsWith("/essays/Draft")) {
           await route.fulfill({ json: essay });
         } else await route.fulfill({ status: 404 });
       });
@@ -45,8 +45,8 @@ for (const operation of ["save", "delete"] as const) {
       await expect.poll(() => !!mutation).toBe(true);
       expect(mutation!.request().method()).toBe(operation === "save" ? "PUT" : "DELETE");
       expect(mutation!.request().postDataJSON()).toEqual(operation === "save"
-        ? { path: "context.json", contextLayer: { title: { tag: "SetScalar", contents: "Edited title" } } }
-        : { path: "context.json" });
+        ? { path: "Draft/context.json", contextLayer: { title: { tag: "SetScalar", contents: "Edited title" } } }
+        : { path: "Draft/context.json" });
       await expect(grade).toHaveJSProperty("disabled", true);
       await expect(panel.getByRole("button", { name: "Refresh preview" })).toBeDisabled();
       await expect(page.locator("sl-button").filter({ hasText: "Save Draft" })).toHaveJSProperty("disabled", false);
@@ -70,7 +70,7 @@ for (const operation of ["save", "delete"] as const) {
       await expect(grade).toHaveJSProperty("disabled", true);
       await expect(panel.getByText("Resolving context…", { exact: true })).toBeVisible();
       await resolution!.fulfill({ json: { ...effective, title: succeeds ? operation === "save" ? "Edited title" : null : "Saved title" } });
-      await expect(grade).toHaveJSProperty("disabled", false);
+      await expect(grade).toHaveJSProperty("disabled", true);
       await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("# Editing during mutation");
       const nextAction = operation === "delete"
         ? succeeds ? "Create context" : "Remove layer"

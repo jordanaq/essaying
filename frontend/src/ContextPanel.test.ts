@@ -8,7 +8,7 @@ const effective: EffectiveContext = {
   instructions: ["Use sources."], grading_directions: ["Check evidence."],
   rubric: { clarity: { weight: 0.4, description: "Clear writing" } }
 };
-const props = { accountId: "alice smith", directoryPath: ["History & Art"], essayPath: ["History & Art", "draft.md"] };
+const props = { accountId: "alice smith", directoryPath: ["History & Art"], essayPath: ["History & Art", "draft"] };
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 
 function mockApi(initial: ContextLayer | null = null, parents: Record<string, ContextLayer> = {}) {
@@ -90,7 +90,7 @@ describe("Writing context", () => {
     expect(screen.getByText("Clear writing")).toBeInTheDocument();
     const urls = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
     expect(urls.some((url) => url.pathname.includes("alice%20smith") && url.searchParams.get("path") === "History & Art/context.json")).toBe(true);
-    expect(urls.some((url) => url.pathname.endsWith("/effective") && url.searchParams.get("path") === "History & Art/draft.md")).toBe(true);
+    expect(urls.some((url) => url.pathname.endsWith("/effective") && url.searchParams.get("path") === "History & Art/draft")).toBe(true);
   });
 
   it("creates tagged overrides, updates the saved layer, and removes it with confirmation", async () => {

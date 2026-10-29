@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("switching to an empty essay clears the editor and saves empty markdown", async ({ page }) => {
-  const populated = { path: ["meow", "meoww.md"], title: "meoww", markdown: "mrroww" };
-  const empty = { path: ["meow", "meow in", "essay.md"], title: "essay", markdown: "" };
+  const populated = { path: ["meow", "meoww"], title: "meoww", prompt: "", markdown: "mrroww" };
+  const empty = { path: ["meow", "meow in", "Empty Essay"], title: "Empty Essay", prompt: "", markdown: "" };
   await page.addInitScript(() => localStorage.setItem("essay-account-id", "alice"));
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -12,15 +12,15 @@ test("switching to an empty essay clears the editor and saves empty markdown", a
     } else if (path.endsWith("/workspace")) {
       await route.fulfill({ json: { tree: [{
         name: "meow", path: ["meow"], nodeType: "WorkspaceDirectoryNode", children: [
-          { name: "meoww.md", path: populated.path, nodeType: "WorkspaceEssayNode", children: [] },
+          { name: "meoww", path: populated.path, nodeType: "WorkspaceEssayNode", children: [] },
           { name: "meow in", path: ["meow", "meow in"], nodeType: "WorkspaceDirectoryNode", children: [
-            { name: "essay.md", path: empty.path, nodeType: "WorkspaceEssayNode", children: [] }
+            { name: "Empty Essay", path: empty.path, nodeType: "WorkspaceEssayNode", children: [] }
           ] }
         ]
       }] } });
-    } else if (path.endsWith("/workspace/essays/meow/meoww.md")) {
+    } else if (path.endsWith("/workspace/essays/meow/meoww")) {
       await route.fulfill({ json: populated });
-    } else if (path.endsWith("/workspace/essays/meow/meow in/essay.md")) {
+    } else if (path.endsWith("/workspace/essays/meow/meow in/Empty Essay")) {
       await route.fulfill({ json: empty });
     } else {
       await route.fulfill({ status: 404, json: { error: { message: "Context does not exist." } } });
@@ -34,8 +34,8 @@ test("switching to an empty essay clears the editor and saves empty markdown", a
   const folder = page.locator('sl-tree-item[data-path=\'["meow","meow in"]\']');
   await folder.press("ArrowRight");
   await expect(folder).toHaveAttribute("aria-expanded", "true");
-  await page.locator('.tree-item-name[title="essay.md"]').click();
-  await expect(page.getByText("Currently editing meow/meow in/essay.md.", { exact: true })).toBeVisible();
+  await page.locator('.tree-item-name[title="Empty Essay"]').click();
+  await expect(page.getByText("Currently editing meow/meow in/Empty Essay.", { exact: true })).toBeVisible();
   await expect(editor).toHaveValue("");
 
   const saveRequest = page.waitForRequest((request) => request.method() === "PUT");

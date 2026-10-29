@@ -22,10 +22,10 @@
   let currentSelection = "";
   let exists = false;
   let loading = false;
-  let busy = false;
+  export let busy = false;
   let error = "";
   let notice = "";
-  let dirty = false;
+  export let dirty = false;
   let confirmDelete = false;
   $: effective = $preview.context;
   $: effectiveError = $preview.error;
@@ -39,6 +39,7 @@
     scope = directoryPath.join("/");
   }
   $: scopes = Array.from({ length: directoryPath.length + 1 }, (_, index) => directoryPath.slice(0, index).join("/"));
+  $: essayScope = essayPath !== null && scope === essayPath.join("/");
   $: layerPath = scope ? `${scope}/context.json` : "context.json";
   $: void loadLayer(accountId, layerPath);
   $: void preview.load(accountId, essayPath);
@@ -62,6 +63,10 @@
     criteria = Object.entries(layer.rubric?.contents ?? {}).map(([name, criterion]) => ({ name, weight: criterion.weight, description: criterion.description ?? "" }));
     dirty = false;
     confirmDelete = false;
+  }
+
+  export function discardChanges() {
+    void loadLayer(accountId, layerPath);
   }
 
   async function loadLayer(account: string, path: string) {
@@ -174,14 +179,14 @@
 <section class="context-panel" aria-label="Writing context">
   <div class="context-heading">
     <div><h3>Writing context</h3><p>Give every draft the right direction.</p></div>
-    <span class="context-chip">{loading ? "Loading…" : exists ? "Folder layer" : "Inherited"}</span>
+    <span class="context-chip">{loading ? "Loading…" : exists ? essayScope ? "Essay layer" : "Folder layer" : "Inherited"}</span>
   </div>
   <label class="scope-label">Edit settings for
     <select bind:value={scope} disabled={loading || busy || dirty}>
-      {#each scopes as path}<option value={path}>{path || "Workspace root"}</option>{/each}
+      {#each scopes as path}<option value={path}>{path ? path === essayPath?.join("/") ? `${path} (this essay)` : path : "Workspace root"}</option>{/each}
     </select>
   </label>
-  <p class="context-hint">Settings apply to every essay in this folder and its descendants. Inherit keeps the parent setting.</p>
+  <p class="context-hint">{essayScope ? "Settings apply to this essay. Inherit keeps the parent setting." : "Settings apply to every essay in this folder and its descendants. Inherit keeps the parent setting."}</p>
   {#if error}<p role="alert" class="context-error">{error}</p>{/if}
   {#if notice}<p role="status" class="context-notice">{notice}</p>{/if}
   {#if loading}
@@ -245,7 +250,7 @@
       {#if dirty}<p class="context-hint">Unsaved changes. Save or discard before changing scope.</p>{/if}
     </form>
     {#if confirmDelete}
-      <div class="delete-confirm"><p>Remove this folder’s settings? Parent settings will apply.</p><button type="button" disabled={busy} on:click={() => mutate(true)}>Confirm removal</button><button type="button" disabled={busy} on:click={() => (confirmDelete = false)}>Cancel</button></div>
+      <div class="delete-confirm"><p>Remove this {essayScope ? "essay’s" : "folder’s"} settings? Parent settings will apply.</p><button type="button" disabled={busy} on:click={() => mutate(true)}>Confirm removal</button><button type="button" disabled={busy} on:click={() => (confirmDelete = false)}>Cancel</button></div>
     {/if}
   {/if}
   <details class="effective-context" open>
@@ -257,7 +262,7 @@
     {:else if effectiveLoading}<p role="status">Resolving context…</p>
     {:else if effectiveError}<p role="alert" class="context-error">{effectiveError}</p><button type="button" disabled={busy} on:click={() => preview.load(accountId, essayPath)}>Retry preview</button>
     {:else if effective}
-      <p class="context-hint">Saved settings from root through the essay’s folder. {essayPath.join("/")}</p>
+      <p class="context-hint">Saved settings from root through this essay. {essayPath.join("/")}</p>
       <dl>{#each ["title", "audience", "model"] as key}<div><dt>{key}</dt><dd>{effective[key as "title" | "audience" | "model"] ?? "Not set"}</dd></div>{/each}</dl>
       <div class="context-tags">{#each effective.tags as tag}<span class="context-chip">{tag}</span>{/each}</div>
       {#each [{ label: "Instructions", items: effective.instructions }, { label: "Grading directions", items: effective.grading_directions }] as group}

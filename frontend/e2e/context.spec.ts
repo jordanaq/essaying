@@ -13,6 +13,10 @@ test("edit folder context and preview inheritance through the live API", async (
     await page.addInitScript((id) => localStorage.setItem("essay-account-id", id), accountId);
     await page.goto("/");
     const panel = page.getByRole("region", { name: "Writing context" });
+    await expect(panel.getByLabel("Edit settings for")).toHaveValue("History/draft");
+    await expect(panel.getByLabel("Edit settings for").locator("option")).toHaveText([
+      "Workspace root", "History", "History/draft (this essay)"
+    ]);
     await expect(panel.getByRole("button", { name: "Create context" })).toBeEnabled();
     await expect(panel.getByText("Students", { exact: true })).toBeVisible();
     await panel.getByLabel("Title behavior").selectOption("SetScalar");
@@ -27,7 +31,25 @@ test("edit folder context and preview inheritance through the live API", async (
     await expect(panel.locator("dd").filter({ hasText: "Causes of change" })).toBeVisible();
     await expect(panel.getByText("Use sources.", { exact: true })).toBeVisible();
     await expect(panel.getByRole("table")).toContainText("Support claims with sources.");
+    const ownLayer = await request.get(`${base}/context?path=History%2Fdraft%2Fcontext.json`);
+    expect((await ownLayer.json()).title).toEqual({ tag: "SetScalar", contents: "Causes of change" });
+    const prompt = page.getByRole("textbox", { name: "Assignment prompt", exact: true });
+    const draft = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
+    await expect(prompt).toHaveValue("");
+    await prompt.fill("Compare short-term and long-term causes.");
+    await draft.fill("# Unsaved response");
+    await page.getByText("Save Prompt", { exact: true }).click();
+    await expect(page.getByText("Prompt saved.", { exact: true })).toBeVisible();
+    await expect(draft).toHaveValue("# Unsaved response");
+    let savedEssay = await request.get(`${base}/essays/History/draft`);
+    expect(await savedEssay.json()).toMatchObject({ prompt: "Compare short-term and long-term causes.", markdown: "# Draft" });
+    await page.getByText("Save Draft", { exact: true }).click();
+    await expect(page.getByText("Draft saved.", { exact: true })).toBeVisible();
+    savedEssay = await request.get(`${base}/essays/History/draft`);
+    expect(await savedEssay.json()).toMatchObject({ prompt: "Compare short-term and long-term causes.", markdown: "# Unsaved response" });
     await page.reload();
+    await expect(prompt).toHaveValue("Compare short-term and long-term causes.");
+    await expect(draft).toHaveValue("# Unsaved response");
     await expect(panel.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Causes of change");
     // Update saved settings outside the UI, then refresh only the effective preview.
     expect((await request.put(`${base}/context`, { data: { path: "context.json", contextLayer: {

@@ -383,6 +383,8 @@ sl-tree-item .file-icon::after {
 
 .editor-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }
@@ -489,3 +491,14 @@ sl-button[variant="primary"]::part(base) {
     overflow-wrap: anywhere;
   }
 }
+
+.assignment-editor {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--sl-color-neutral-200);
+  min-width: 0;
+}
+.assignment-editor .editor-actions { margin-top: 0; }
+
+.context-navigation-guard { border: 0; padding: 0; margin: 0; min-width: 0; }
