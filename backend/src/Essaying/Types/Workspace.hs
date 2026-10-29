@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Essaying.Types.Workspace
   ( WorkspaceNodeType (..)
@@ -18,7 +19,10 @@ module Essaying.Types.Workspace
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Control.Monad (unless, when)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (Null), defaultOptions, genericToJSON, omitNothingFields, withObject, (.:?))
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -46,6 +50,7 @@ newtype WorkspaceTreeResponse = WorkspaceTreeResponse
 data WorkspaceEssayContent = WorkspaceEssayContent
   { path :: [Text]
   , title :: Text
+  , prompt :: Text
   , markdown :: Text
   }
   deriving stock (Eq, Show, Generic)
@@ -61,16 +66,32 @@ data CreateWorkspaceDirectoryRequest = CreateWorkspaceDirectoryRequest
 data CreateWorkspaceEssayRequest = CreateWorkspaceEssayRequest
   { parentPath :: [Text]
   , essayName :: Text
+  , prompt :: Maybe Text
   , markdown :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 data SaveWorkspaceEssayRequest = SaveWorkspaceEssayRequest
-  { markdown :: Text
+  { prompt :: Maybe Text
+  , markdown :: Maybe Text
   }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance ToJSON SaveWorkspaceEssayRequest where
+  toJSON = genericToJSON defaultOptions {omitNothingFields = True}
+
+instance FromJSON SaveWorkspaceEssayRequest where
+  parseJSON = withObject "SaveWorkspaceEssayRequest" $ \o -> do
+    unless (all (`elem` ["prompt", "markdown"]) (KeyMap.keys o)) $
+      fail "Unknown essay save field."
+    when (any (== Null) (KeyMap.elems o)) $
+      fail "Essay save fields must be strings."
+    newPrompt <- o .:? "prompt"
+    newMarkdown <- o .:? "markdown"
+    unless (isJust newPrompt /= isJust newMarkdown) $
+      fail "Provide exactly one of prompt or markdown."
+    pure (SaveWorkspaceEssayRequest newPrompt newMarkdown)
 
 -- | Result of attempting to create a directory in the workspace.
 data CreateWorkspaceDirectoryResult

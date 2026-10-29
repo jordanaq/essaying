@@ -61,7 +61,7 @@ import Essaying.Types.Workspace
   , WorkspaceNode (..)
   , WorkspaceNodeType (..)
   , WorkspaceTreeResponse
-  , SaveWorkspaceEssayRequest
+  , SaveWorkspaceEssayRequest (SaveWorkspaceEssayRequest)
   , WorkspaceDeleteError (..)
   , WorkspaceDeleteResult (..)
   )
@@ -147,6 +147,12 @@ workspaceTests = TestLabel "workspace" $ TestList
 
 workspacePathHelpers :: Test
 workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
+  let promptUpdate = SaveWorkspaceEssayRequest (Just "Assignment") Nothing
+      draftUpdate = SaveWorkspaceEssayRequest Nothing (Just "")
+  assertEqual "prompt-only request round-trips without a null markdown field"
+    (Just promptUpdate) (decode (encode promptUpdate))
+  assertEqual "empty draft request round-trips without a null prompt field"
+    (Just draftUpdate) (decode (encode draftUpdate))
   assertEqual "ordinary segment is safe" True (isSafeSegment "History")
   assertEqual "empty segment is unsafe" False (isSafeSegment "")
   assertEqual "dot-dot segment is unsafe" False (isSafeSegment "..")
@@ -172,15 +178,15 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   duplicateDirectory <- createWorkspaceDirectory workspace [] "History"
   assertEqual "duplicate directory is reported" WorkspaceDirectoryAlreadyExists duplicateDirectory
 
-  createdEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" (Just "# Causes\n")
-  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution"] "French-Revolution" "# Causes\n"
+  createdEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing (Just "# Causes\n")
+  let expectedEssay = WorkspaceEssayContent ["History", "French-Revolution"] "French-Revolution" "" "# Causes\n"
   assertEqual "essay creation returns content" (WorkspaceEssayCreated expectedEssay) createdEssay
-  duplicateEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing
+  duplicateEssay <- createWorkspaceEssay workspace ["History"] "French-Revolution" Nothing Nothing
   assertEqual "duplicate essay is reported" WorkspaceEssayAlreadyExists duplicateEssay
 
   loadedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "created essay can be loaded" (Just expectedEssay) loadedEssay
-  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] "# Updated\n"
+  didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] Nothing (Just "# Updated\n")
   assertEqual "existing essay can be saved" True didSave
   savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "saved content can be loaded" (Just (expectedEssay {markdown = "# Updated\n"})) savedEssay
@@ -188,10 +194,10 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let essayDirectory = rootPath </> "History" </> "French-Revolution"
   writeFile (essayDirectory </> "prompt.md") "Keep assignment"
   writeFile (essayDirectory </> "context.json") "{invalid"
-  emptySaved <- saveWorkspaceEssay workspace ["History", "French-Revolution"] ""
+  emptySaved <- saveWorkspaceEssay workspace ["History", "French-Revolution"] Nothing (Just "")
   assertEqual "empty draft save succeeds despite broken context" True emptySaved
   assertEqual "empty draft survives reload"
-    (Just (expectedEssay {markdown = ""}))
+    (Just (expectedEssay {markdown = "", prompt = "Keep assignment"}))
     =<< loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "saving leaves the prompt unchanged" "Keep assignment"
     =<< readFile (essayDirectory </> "prompt.md")
@@ -243,18 +249,18 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "deleted essay no longer loads" Nothing essayAfterDelete
   assertEqual "essay deletion removes all internal files" False
     =<< doesDirectoryExist essayDirectory
-  emptyCreated <- createWorkspaceEssay workspace ["History"] "Empty" Nothing
+  emptyCreated <- createWorkspaceEssay workspace ["History"] "Empty" Nothing Nothing
   assertEqual "creation without text creates an empty draft"
-    (WorkspaceEssayCreated (WorkspaceEssayContent ["History", "Empty"] "Empty" "")) emptyCreated
+    (WorkspaceEssayCreated (WorkspaceEssayContent ["History", "Empty"] "Empty" "" "")) emptyCreated
   _ <- createWorkspaceDirectory workspace ["History"] "Notes"
-  _ <- createWorkspaceEssay workspace ["History", "Notes"] "Nested" (Just "# Nested\n")
+  _ <- createWorkspaceEssay workspace ["History", "Notes"] "Nested" Nothing (Just "# Nested\n")
   didDeleteDirectory <- deleteWorkspaceDirectory workspace ["History"]
   assertEqual "recursive directory deletion succeeds" WorkspaceDeleteSucceeded didDeleteDirectory
   directoryAfterDelete <- doesDirectoryExist (rootPath </> "History")
   assertEqual "deleted directory is gone" False directoryAfterDelete
   missingEssay <- loadWorkspaceEssay workspace ["History", "Missing"]
   assertEqual "missing essay loads as Nothing" Nothing missingEssay
-  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] "nope"
+  savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] Nothing (Just "nope")
   assertEqual "missing essay cannot be saved" False savedMissing
 
 workspaceDeleteEndpoints :: Test
@@ -263,9 +269,9 @@ workspaceDeleteEndpoints = TestCase $
     let accountId = AccountId "delete-test"
         wsRoot = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) accountId)
     createDirectoryIfMissing True (unWorkspaceRoot wsRoot)
-    _ <- createWorkspaceEssay wsRoot [] "Remove Me" (Just "# Temporary\n")
+    _ <- createWorkspaceEssay wsRoot [] "Remove Me" Nothing (Just "# Temporary\n")
     _ <- createWorkspaceDirectory wsRoot [] "History"
-    _ <- createWorkspaceEssay wsRoot ["History"] "Nested" (Just "# Nested\n")
+    _ <- createWorkspaceEssay wsRoot ["History"] "Nested" Nothing (Just "# Nested\n")
 
     withEnvVar "HESSAY_CACHE" (Just cachePath) $
       testWithApplication (pure app) $ \port -> do

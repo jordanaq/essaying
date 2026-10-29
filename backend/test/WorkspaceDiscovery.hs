@@ -2,16 +2,18 @@
 
 module WorkspaceDiscovery (tests) where
 
-import Control.Exception (bracket)
+import Control.Exception (IOException, bracket, try)
 import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Persistence.Workspace
-  ( deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode )
+  ( deleteWorkspaceDirectory, deleteWorkspaceEssay, isEssayDir, listWorkspaceTree, loadWorkspaceNode
+  , loadWorkspaceEssay, saveWorkspaceEssay )
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceNode (..), WorkspaceNodeType (..) )
+  ( WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
+  , WorkspaceNode (..), WorkspaceNodeType (..) )
 import System.Directory
   ( createDirectory, createDirectoryLink, createFileLink, getTemporaryDirectory
-  , removeFile, removePathForcibly
+  , pathIsSymbolicLink, removeFile, removePathForcibly
   )
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
@@ -142,6 +144,91 @@ tests = TestLabel "essay directory discovery" $ TestList
           =<< deleteWorkspaceEssay workspace target
         assertEqual "nested draft survives" "Keep inner"
           =<< readFile (root </> "Essay" </> "Nested" </> "essay.md")
+  , TestLabel "prompt loading preservation update and explicit clearing" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay" </> "essay.md") "Draft"
+        assertEqual "absent prompt loads as empty"
+          (Just (WorkspaceEssayContent ["Essay"] "Essay" "" "Draft"))
+          =<< loadWorkspaceEssay workspace ["Essay"]
+        assertEqual "empty update is rejected" False
+          =<< saveWorkspaceEssay workspace ["Essay"] Nothing Nothing
+        assertEqual "two-file update is rejected" False
+          =<< saveWorkspaceEssay workspace ["Essay"] (Just "Do not write") (Just "Do not write")
+        assertEqual "rejected updates leave the draft intact"
+          (Just (WorkspaceEssayContent ["Essay"] "Essay" "" "Draft"))
+          =<< loadWorkspaceEssay workspace ["Essay"]
+        assertEqual "prompt can be saved" True
+          =<< saveWorkspaceEssay workspace ["Essay"] (Just "Assignment") Nothing
+        assertEqual "prompt survives reload in the correct field"
+          (Just (WorkspaceEssayContent ["Essay"] "Essay" "Assignment" "Draft"))
+          =<< loadWorkspaceEssay workspace ["Essay"]
+        assertEqual "omitting prompt preserves it" True
+          =<< saveWorkspaceEssay workspace ["Essay"] Nothing (Just "Updated")
+        assertEqual "draft and prompt remain distinct"
+          (Just (WorkspaceEssayContent ["Essay"] "Essay" "Assignment" "Updated"))
+          =<< loadWorkspaceEssay workspace ["Essay"]
+        assertEqual "explicit empty prompt clears it" True
+          =<< saveWorkspaceEssay workspace ["Essay"] (Just "") Nothing
+        assertEqual "empty prompt survives reload"
+          (Just (WorkspaceEssayContent ["Essay"] "Essay" "" "Updated"))
+          =<< loadWorkspaceEssay workspace ["Essay"]
+  , TestLabel "saving a prompt rejects a link and preserves its target" $ TestCase $
+      withWorkspace $ \root workspace -> withWorkspace $ \outside _ -> do
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay/essay.md") "Keep draft"
+        writeFile (outside </> "assignment.md") "Keep external prompt"
+        createFileLink (outside </> "assignment.md") (root </> "Essay/prompt.md")
+        assertIOException $ saveWorkspaceEssay workspace ["Essay"] (Just "Do not write") Nothing
+        assertEqual "linked prompt target is unchanged" "Keep external prompt"
+          =<< readFile (outside </> "assignment.md")
+        assertEqual "draft is unchanged after rejected prompt save" "Keep draft"
+          =<< readFile (root </> "Essay/essay.md")
+        assertEqual "prompt link is preserved" True
+          =<< pathIsSymbolicLink (root </> "Essay/prompt.md")
+  , TestLabel "draft saving ignores an invalid linked prompt" $ TestCase $
+      withWorkspace $ \root workspace -> withWorkspace $ \outside _ -> do
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay/essay.md") "Original draft"
+        writeFile (outside </> "assignment.md") "Keep external prompt"
+        createFileLink (outside </> "assignment.md") (root </> "Essay/prompt.md")
+        assertEqual "draft save does not require a valid prompt" True
+          =<< saveWorkspaceEssay workspace ["Essay"] Nothing (Just "Updated draft")
+        assertEqual "draft was saved" "Updated draft"
+          =<< readFile (root </> "Essay/essay.md")
+        assertEqual "prompt target is unchanged" "Keep external prompt"
+          =<< readFile (outside </> "assignment.md")
+        assertEqual "prompt link is unchanged" True
+          =<< pathIsSymbolicLink (root </> "Essay/prompt.md")
+  , TestLabel "a prompt directory blocks prompt writes but not draft writes" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        createDirectory (root </> "Essay")
+        writeFile (root </> "Essay/essay.md") "Original draft"
+        createDirectory (root </> "Essay/prompt.md")
+        writeFile (root </> "Essay/prompt.md/reference.txt") "Keep reference"
+        assertIOException $ saveWorkspaceEssay workspace ["Essay"] (Just "Do not write") Nothing
+        assertEqual "failed prompt write leaves draft intact" "Original draft"
+          =<< readFile (root </> "Essay/essay.md")
+        assertEqual "draft save ignores prompt directory" True
+          =<< saveWorkspaceEssay workspace ["Essay"] Nothing (Just "Updated draft")
+        assertEqual "draft was saved" "Updated draft"
+          =<< readFile (root </> "Essay/essay.md")
+        assertEqual "prompt directory contents are preserved" "Keep reference"
+          =<< readFile (root </> "Essay/prompt.md/reference.txt")
+  , TestLabel "linked ancestors prevent both prompt and draft writes" $ TestCase $
+      withWorkspace $ \root workspace -> withWorkspace $ \outside _ -> do
+        createDirectory (outside </> "Essay")
+        writeFile (outside </> "Essay/essay.md") "Keep external draft"
+        writeFile (outside </> "Essay/prompt.md") "Keep external prompt"
+        createDirectoryLink outside (root </> "Linked")
+        assertIOException $
+          saveWorkspaceEssay workspace ["Linked", "Essay"] (Just "Do not write") Nothing
+        assertIOException $
+          saveWorkspaceEssay workspace ["Linked", "Essay"] Nothing (Just "Do not write")
+        assertEqual "ancestor link target draft is unchanged" "Keep external draft"
+          =<< readFile (outside </> "Essay/essay.md")
+        assertEqual "ancestor link target prompt is unchanged" "Keep external prompt"
+          =<< readFile (outside </> "Essay/prompt.md")
   , TestLabel "ordinary essay and folder deletion remain available" $ TestCase $
       withWorkspace $ \root workspace -> do
         createDirectory (root </> "History")
@@ -152,3 +239,11 @@ tests = TestLabel "essay directory discovery" $ TestList
         assertEqual "ordinary folder can still be deleted"
           WorkspaceDeleteSucceeded =<< deleteWorkspaceDirectory workspace ["History"]
   ]
+
+-- Filesystem validation failures currently propagate as IOException.
+assertIOException :: IO a -> IO ()
+assertIOException action = do
+  result <- try (action >> pure ()) :: IO (Either IOException ())
+  case result of
+    Left _ -> pure ()
+    Right () -> assertFailure "expected save to reject the filesystem target"

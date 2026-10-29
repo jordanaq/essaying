@@ -13,8 +13,8 @@ module Essaying.Persistence.Workspace
   , loadWorkspaceNode
   , safeResolvePath
   , isSafeSegment
-  , essayFileName
-  , essayDraftFileName
+  , essayDraftPath
+  , essayPromptPath
   , isEssayDir
   , requireNonEssayParents
   ) where
@@ -49,18 +49,21 @@ import System.IO.Error (doesNotExistErrorType, mkIOError)
 debug :: Int -> String -> IO ()
 debug = debug_ "[Workspace]"
 
-
--- | Append the @.md@ extension to an essay title for storage on disk.
-essayFileName :: Text -> FilePath
-essayFileName essayName = Text.unpack essayName <> ".md"
-
 -- | Required draft filename inside an essay directory.
 essayDraftFileName :: FilePath
 essayDraftFileName = "essay.md"
 
--- | Build an essay path from its parent and extensionless title.
-essayPathSegments :: FilePath -> FilePath
-essayPathSegments = (</> essayDraftFileName)
+-- | Name of the prompt file inside an essay directory.
+essayPromptFileName :: FilePath
+essayPromptFileName = "prompt.md"
+
+-- | Build the full path to the essay draft file within an essay directory.
+essayDraftPath :: FilePath -> FilePath
+essayDraftPath = (</> essayDraftFileName)
+
+-- | Build the full path to the essay prompt file within an essay directory.
+essayPromptPath :: FilePath -> FilePath
+essayPromptPath = (</> essayPromptFileName)
 
 -- | Check whether a path is a directory and contains an `essay.md` file.
 isEssayDir :: FilePath -> IO Bool
@@ -203,11 +206,28 @@ loadWorkspaceNode workspaceRoot segments = do
 -- | Load an essay using path segments that point to an essay dir.
 -- Returns 'Nothing' if the directory is not an essay or the path is unsafe.
 loadWorkspaceEssay :: WorkspaceRoot -> [Text] -> IO (Maybe WorkspaceEssayContent)
-loadWorkspaceEssay workspaceRoot segments = runMaybeT $ do
+loadWorkspaceEssay workspaceRoot@(WorkspaceRoot root) segments = runMaybeT $ do
   path <- workspaceEssayPath workspaceRoot segments
-  let essayTitle = last segments
-  essayMarkdown <- liftIO $ TextIO.readFile (path </> essayDraftFileName)
-  pure $ WorkspaceEssayContent segments essayTitle essayMarkdown
+
+  let promptPath = essayPromptPath path
+      paths = scanl (</>) root (map Text.unpack segments)
+
+  checked <- liftIO $ checkPathEntries root (paths <> [promptPath])
+
+  promptText <- liftIO $ case checked of
+    Right False -> pure ""
+    Right True -> do
+      isFile <- doesFileExist promptPath
+      unless isFile $ ioError (userError "prompt.md must be a regular file")
+      TextIO.readFile promptPath
+
+    Left (PathSymbolicLink _) -> ioError (userError "Essay paths must not contain symbolic links")
+    Left (PathMissingParent _ err) -> ioError err
+    Left (PathIoError _ err) -> ioError err
+
+  essayMarkdown <- liftIO $ TextIO.readFile (essayDraftPath path)
+
+  pure $ WorkspaceEssayContent segments (last segments) promptText essayMarkdown
 
 -- | Create a new directory under @parentPath@.  If the directory already
 -- exists, return 'WorkspaceDirectoryAlreadyExists'. The parent must
@@ -242,9 +262,10 @@ createWorkspaceEssay
   :: WorkspaceRoot
   -> [Text]    -- ^ parent path
   -> Text      -- ^ essay name (without extension)
+  -> Maybe Text -- ^ initial prompt content
   -> Maybe Text -- ^ initial markdown content
   -> IO CreateWorkspaceEssayResult
-createWorkspaceEssay workspaceRoot parentPath essayName mMarkdown = do
+createWorkspaceEssay workspaceRoot parentPath essayName mPrompt mMarkdown = do
   result <- runExceptT $ do
     let segments = parentPath <> [essayName]
 
@@ -273,7 +294,8 @@ createWorkspaceEssay workspaceRoot parentPath essayName mMarkdown = do
     liftIO $ debug 3 $ "Creating essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
       <> " path=" <> show path
     liftIO $ createDirectory path
-    liftIO $ TextIO.writeFile (essayPathSegments path) (maybe "" id mMarkdown)
+    liftIO $ TextIO.writeFile (essayPromptPath path) (maybe "" id mPrompt)
+    liftIO $ TextIO.writeFile (essayDraftPath path) (maybe "" id mMarkdown)
 
     content <- liftIO $ loadWorkspaceEssay workspaceRoot segments
     case content of
@@ -284,22 +306,37 @@ createWorkspaceEssay workspaceRoot parentPath essayName mMarkdown = do
     Left failure -> failure
     Right essay -> WorkspaceEssayCreated essay
 
--- | Overwrite an existing @.md@ essay. Return 'False' for an empty,
--- non-essay, unsafe, or missing path; filesystem errors propagate.
+-- | Update exactly one essay file. Omitted fields are preserved and supplied
+-- empty strings clear the file. Invalid updates or targets return False;
+-- filesystem errors propagate.
 saveWorkspaceEssay
   :: WorkspaceRoot
   -> [Text]    -- ^ essay path
-  -> Text      -- ^ new markdown content
+  -> Maybe Text -- ^ new prompt content
+  -> Maybe Text -- ^ new markdown content
   -> IO Bool
-saveWorkspaceEssay workspaceRoot essayPath newMarkdown =
+saveWorkspaceEssay workspaceRoot@(WorkspaceRoot root) essayPath newPrompt newMarkdown = do
   fmap isJust . runMaybeT $ do
+    guard (isJust newPrompt /= isJust newMarkdown)
     path <- workspaceEssayPath workspaceRoot essayPath
 
-    let essayFilePath = essayPathSegments path
+    let promptFilePath = essayPromptPath path
+        essayFilePath = essayDraftPath path
+        paths' = scanl (</>) root (map Text.unpack essayPath)
+        paths = paths' <> (if isJust newPrompt then [promptFilePath] else []) <> (if isJust newMarkdown then [essayFilePath] else [])
+
+    checked <- liftIO $ checkPathEntries root paths
+    _ <- liftIO $ case checked of
+      Left (PathSymbolicLink _) -> ioError (userError "Path contains symbolic link")
+      Left (PathMissingParent _ err) -> ioError err
+      Left (PathIoError _ err) -> ioError err
+      Right _ -> pure ()
 
     liftIO $ debug 3 $ "Saving essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
-      <> " path=" <> show essayFilePath
-    liftIO $ TextIO.writeFile essayFilePath newMarkdown
+      <> " path=" <> show path
+
+    when (isJust newPrompt) $ liftIO $ TextIO.writeFile promptFilePath (maybe "" id newPrompt)
+    when (isJust newMarkdown) $ liftIO $ TextIO.writeFile essayFilePath (maybe "" id newMarkdown)
 
 -- | Delete an existing essay directory.
 deleteWorkspaceEssay :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult

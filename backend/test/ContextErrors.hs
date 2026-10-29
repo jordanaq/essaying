@@ -98,6 +98,29 @@ tests = TestList
       saved <- call "PUT" "/api/v1/accounts/alice/workspace/essays/Child" "{\"markdown\":\"Saved despite invalid context\"}"
       assertEqual "essay save remains independent" 200 (statusCode (simpleStatus saved))
       assertEqual "essay persisted" "Saved despite invalid context" =<< readFile (root </> "Child/essay.md")
+  , TestLabel "essay updates independently save optional prompt or markdown" $ TestCase $ withWorkspace $ \root -> do
+      createDirectory (root </> "Essay")
+      writeFile (root </> "Essay/essay.md") "Original draft"
+      let url = "/api/v1/accounts/alice/workspace/essays/Essay"
+          save body expectedPrompt expectedDraft = do
+            response <- call "PUT" url body
+            assertEqual "save status" 200 (statusCode (simpleStatus response))
+            let value = decode (simpleBody response)
+            assertEqual "returned prompt" (Just (String expectedPrompt)) (value >>= member ["prompt"])
+            assertEqual "returned draft" (Just (String expectedDraft)) (value >>= member ["markdown"])
+      save "{\"prompt\":\"Assignment\"}" "Assignment" "Original draft"
+      save "{\"markdown\":\"Updated draft\"}" "Assignment" "Updated draft"
+      forM_ ["{}", "{\"prompt\":\"Bad\",\"markdown\":\"Bad\"}",
+        "{\"prompt\":null}", "{\"markdown\":null}", "{\"markdown\":12}",
+        "{\"markdown\":\"Bad\",\"extra\":true}"] $ \body -> do
+          rejected <- call "PUT" url body
+          assertEqual "invalid save request is rejected" 400 (statusCode (simpleStatus rejected))
+      assertEqual "invalid updates preserve saved prompt" "Assignment"
+        =<< readFile (root </> "Essay/prompt.md")
+      assertEqual "invalid updates preserve saved draft" "Updated draft"
+        =<< readFile (root </> "Essay/essay.md")
+      save "{\"markdown\":\"\"}" "Assignment" ""
+      save "{\"prompt\":\"\"}" "" ""
   , TestLabel "request decoding failures use a JSON envelope" $ TestCase $ withWorkspace $ \_ -> do
       forM_ [("GET", base, ""), ("GET", base <> "/effective", ""), ("POST", base, "{"),
         ("GET", "/api/v1/accounts/alice/workspace/%63ontext", ""), ("POST", base, "{}"), ("POST", base, "{\"path\":\"context.json\",\"contextLayer\":{},\"extra\":true}"),

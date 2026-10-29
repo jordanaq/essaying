@@ -18,7 +18,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.ByteString qualified as BS
 import Data.Text qualified as Text
 import Essaying.Context (emptyEffectiveContext, applyLayer)
-import Essaying.Persistence.Workspace (essayDraftFileName, isEssayDir, isSafeSegment, requireNonEssayParents, safeResolvePath)
+import Essaying.Persistence.Workspace (essayDraftPath, isEssayDir, isSafeSegment, requireNonEssayParents, safeResolvePath)
 import Essaying.Persistence.Utils (PathCheckError (..), checkPathEntries)
 import Essaying.Types.Context (decodeContextLayer, ContextLayer, ContextLayerError (..), EffectiveContext, EffectiveContextError (..))
 import Essaying.Types.Storage (WorkspaceRoot (..))
@@ -77,7 +77,7 @@ validateEssayPath workspaceRoot@(WorkspaceRoot root) essayPath = runExceptT $ do
   when isFile $ throwE (EffectiveContextEssayNotFound essayPath)
 
   let directoryPaths = scanl (</>) root segments
-      draftPath = fullPath </> essayDraftFileName
+      draftPath = essayDraftPath fullPath
 
   checked <- liftIO $ checkEntries root (directoryPaths <> [draftPath])
   exists <- ExceptT $ pure $

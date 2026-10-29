@@ -106,9 +106,9 @@ loadWorkspaceEssayHandler accountIdText essayPath = do
     Just content -> pure content
 
 saveWorkspaceEssayHandler :: Text -> [Text] -> SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent
-saveWorkspaceEssayHandler accountIdText essayPath (SaveWorkspaceEssayRequest newMarkdown) = do
+saveWorkspaceEssayHandler accountIdText essayPath (SaveWorkspaceEssayRequest newPrompt newMarkdown) = do
   wsRoot <- resolveWorkspaceRoot accountIdText
-  didSave <- liftIO $ saveWorkspaceEssay wsRoot essayPath newMarkdown
+  didSave <- liftIO $ saveWorkspaceEssay wsRoot essayPath newPrompt newMarkdown
   if didSave
     then do
       mContent <- liftIO $ loadWorkspaceEssay wsRoot essayPath
@@ -127,9 +127,9 @@ createWorkspaceDirectoryHandler accountIdText (CreateWorkspaceDirectoryRequest r
     WorkspaceDirectoryCreationFailed _ -> throwError err400
 
 createWorkspaceEssayHandler :: Text -> CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent
-createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParentPath reqEssayName reqMarkdown) = do
+createWorkspaceEssayHandler accountIdText (CreateWorkspaceEssayRequest reqParentPath reqEssayName reqPrompt reqMarkdown) = do
   wsRoot <- resolveWorkspaceRoot accountIdText
-  result <- liftIO $ createWorkspaceEssay wsRoot reqParentPath reqEssayName reqMarkdown
+  result <- liftIO $ createWorkspaceEssay wsRoot reqParentPath reqEssayName reqPrompt reqMarkdown
   case result of
     WorkspaceEssayCreated content -> pure content
     WorkspaceEssayAlreadyExists -> throwError err409

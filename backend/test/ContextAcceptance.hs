@@ -142,9 +142,9 @@ essayLocalContext = TestCase $ withWorkspace $ \root workspace -> do
     Left (EffectiveContextLayerError (ContextLayerJsonError "Subject/First/context.json" _)) -> pure ()
     other -> assertFailure ("expected essay-local JSON error, got " <> show other)
   assertEqual "broken own context does not prevent saving" True
-    =<< saveWorkspaceEssay workspace ["Subject", "First"] "Updated draft"
+    =<< saveWorkspaceEssay workspace ["Subject", "First"] Nothing (Just "Updated draft")
   assertEqual "broken own context does not prevent loading"
-    (Just (WorkspaceEssayContent ["Subject", "First"] "First" "Updated draft"))
+    (Just (WorkspaceEssayContent ["Subject", "First"] "First" "Assignment text is not context JSON." "Updated draft"))
     =<< loadWorkspaceEssay workspace ["Subject", "First"]
 
 directoryIdentity :: Test
@@ -291,8 +291,8 @@ ioFailures = TestCase $ withWorkspace $ \root workspace -> do
     other -> assertFailure ("expected ancestor I/O failure, got " <> show other)
   -- Broken context must leave ordinary essay editing and persistence usable.
   assertEqual "save succeeds with invalid context" True
-    =<< saveWorkspaceEssay workspace ["Root Essay"] "# Updated"
-  assertEqual "load succeeds with invalid context" (Just (WorkspaceEssayContent ["Root Essay"] "Root Essay" "# Updated"))
+    =<< saveWorkspaceEssay workspace ["Root Essay"] Nothing (Just "# Updated")
+  assertEqual "load succeeds with invalid context" (Just (WorkspaceEssayContent ["Root Essay"] "Root Essay" "" "# Updated"))
     =<< loadWorkspaceEssay workspace ["Root Essay"]
 
 pathBoundaries :: Test
