@@ -14,7 +14,7 @@ module Essaying.Types.Workspace
   , SaveWorkspaceEssayRequest (..)
   , CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayResult (..)
-  , WorkspaceDeleteError (..)
+  , WorkspacePathError (..)
   , WorkspaceDeleteResult (..)
   )
 where
@@ -108,17 +108,18 @@ data CreateWorkspaceEssayResult
   | WorkspaceEssayCreationFailed Text
   deriving stock (Eq, Show)
 
--- | Reason a workspace deletion was refused before removing anything.
-data WorkspaceDeleteError
-  = WorkspaceDeleteInvalidPath [Text]
-  | WorkspaceDeleteRootDenied
-  | WorkspaceDeleteTargetNotFound [Text]
-  | WorkspaceDeleteWrongTargetType [Text]
-  | WorkspaceDeleteSymbolicLink [Text]
+-- | Reason a workspace path or target cannot be used by an operation.
+data WorkspacePathError
+  = WorkspacePathInvalidPath [Text]
+  | WorkspacePathNestedEssay [Text]
+  | WorkspacePathRootDenied
+  | WorkspacePathTargetNotFound [Text]
+  | WorkspacePathWrongTargetType [Text]
+  | WorkspacePathSymbolicLink [Text]
   deriving stock (Eq, Show)
 
 -- | Outcome of deleting a workspace essay or directory.
 data WorkspaceDeleteResult
   = WorkspaceDeleteSucceeded
-  | WorkspaceDeleteFailed WorkspaceDeleteError
+  | WorkspaceDeleteFailed WorkspacePathError
   deriving stock (Eq, Show)

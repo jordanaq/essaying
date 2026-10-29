@@ -26,7 +26,7 @@ import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
   ( CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayResult (..)
-  , WorkspaceDeleteError (..)
+  , WorkspacePathError (..)
   , WorkspaceDeleteResult (..)
   , WorkspaceEssayContent (..)
   , WorkspaceNode (..)
@@ -116,15 +116,16 @@ requireNonEssayParents nestedError workspaceRoot parentSegments = do
     when isEssay $ throwE nestedError) parents
 
 -- | Validate an existing essay target without reading or modifying its draft.
-requireWorkspaceEssay :: WorkspaceRoot -> [Text] -> ExceptT WorkspaceDeleteError IO FilePath
+requireWorkspaceEssay :: WorkspaceRoot -> [Text] -> ExceptT WorkspacePathError IO FilePath
 requireWorkspaceEssay workspaceRoot segments = do
-  path <- resolveWorkspaceNodePath (WorkspaceDeleteInvalidPath segments) workspaceRoot segments
+  path <- resolveWorkspaceNodePath (WorkspacePathInvalidPath segments) workspaceRoot segments
   exists <- liftIO $ doesPathExist path
-  unless exists $ throwE (WorkspaceDeleteTargetNotFound segments)
+  unless exists $ throwE (WorkspacePathTargetNotFound segments)
   isSymlink <- liftIO $ pathIsSymbolicLink path
-  when isSymlink $ throwE (WorkspaceDeleteSymbolicLink segments)
+  when isSymlink $ throwE (WorkspacePathSymbolicLink segments)
   isEssay <- liftIO $ isEssayDir path
-  unless isEssay $ throwE (WorkspaceDeleteWrongTargetType segments)
+  unless isEssay $ throwE (WorkspacePathWrongTargetType segments)
+  requireNonEssayParents (WorkspacePathNestedEssay segments) workspaceRoot (init segments)
   pure path
 
 -- | Reads and saves expose validation failure as Nothing rather than an error.
@@ -365,9 +366,9 @@ deleteWorkspaceEssay workspaceRoot essayPath = do
     path <- requireWorkspaceEssay workspaceRoot essayPath
 
     hasSymlink <- liftIO $ hasSymlinkInPath path
-    unless (not hasSymlink) $ throwE (WorkspaceDeleteSymbolicLink essayPath)
+    unless (not hasSymlink) $ throwE (WorkspacePathSymbolicLink essayPath)
 
-    requireNonEssayParents (WorkspaceDeleteWrongTargetType essayPath)
+    requireNonEssayParents (WorkspacePathNestedEssay essayPath)
       workspaceRoot (take (length essayPath - 1) essayPath)
 
     liftIO $ debug 3 $ "Deleting essay in workspace=" <> show (unWorkspaceRoot workspaceRoot)
@@ -381,25 +382,25 @@ deleteWorkspaceEssay workspaceRoot essayPath = do
 -- | Recursively delete a directory and its contents. Refuse the workspace
 -- root, unsafe paths, files, and symbolic-link targets. IO errors propagate.
 deleteWorkspaceDirectory :: WorkspaceRoot -> [Text] -> IO WorkspaceDeleteResult
-deleteWorkspaceDirectory _ [] = pure $ WorkspaceDeleteFailed WorkspaceDeleteRootDenied
+deleteWorkspaceDirectory _ [] = pure $ WorkspaceDeleteFailed WorkspacePathRootDenied
 deleteWorkspaceDirectory workspaceRoot dirPath = do
   result <- runExceptT $ do
-    path <- resolveWorkspaceNodePath (WorkspaceDeleteInvalidPath dirPath) workspaceRoot dirPath
+    path <- resolveWorkspaceNodePath (WorkspacePathInvalidPath dirPath) workspaceRoot dirPath
 
     exists <- liftIO $ doesPathExist path
-    unless exists $ throwE (WorkspaceDeleteTargetNotFound dirPath)
+    unless exists $ throwE (WorkspacePathTargetNotFound dirPath)
 
     hasSymlink <- liftIO $ hasSymlinkInPath path
-    when hasSymlink $ throwE (WorkspaceDeleteSymbolicLink dirPath)
+    when hasSymlink $ throwE (WorkspacePathSymbolicLink dirPath)
 
-    requireNonEssayParents (WorkspaceDeleteWrongTargetType dirPath)
+    requireNonEssayParents (WorkspacePathNestedEssay dirPath)
       workspaceRoot (take (length dirPath - 1) dirPath)
 
     isEssay <- liftIO $ isEssayDir path
-    when isEssay $ throwE (WorkspaceDeleteWrongTargetType dirPath)
+    when isEssay $ throwE (WorkspacePathWrongTargetType dirPath)
 
     isFile <- liftIO $ doesFileExist path
-    when isFile $ throwE (WorkspaceDeleteWrongTargetType dirPath)
+    when isFile $ throwE (WorkspacePathWrongTargetType dirPath)
 
     liftIO $ debug 3 $ "Deleting directory recursively in workspace=" <> show (unWorkspaceRoot workspaceRoot)
       <> " path=" <> show path

@@ -62,7 +62,7 @@ import Essaying.Types.Workspace
   , WorkspaceNodeType (..)
   , WorkspaceTreeResponse
   , SaveWorkspaceEssayRequest (SaveWorkspaceEssayRequest)
-  , WorkspaceDeleteError (..)
+  , WorkspacePathError (..)
   , WorkspaceDeleteResult (..)
   )
 import Network.HTTP.Client (defaultManagerSettings, newManager)
@@ -212,27 +212,27 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   writeFile (rootPath </> "History" </> "context.json") "private context"
   invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.json"]
   assertEqual "non-essay target is distinguished"
-    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "context.json"]))
+    (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History", "context.json"]))
     invalidEssayDelete
   missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing"]
   assertEqual "missing essay is distinguished"
-    (WorkspaceDeleteFailed (WorkspaceDeleteTargetNotFound ["History", "Missing"]))
+    (WorkspaceDeleteFailed (WorkspacePathTargetNotFound ["History", "Missing"]))
     missingEssayDelete
   invalidPathDelete <- deleteWorkspaceEssay workspace ["..", "outside.md"]
   assertEqual "invalid essay path is distinguished"
-    (WorkspaceDeleteFailed (WorkspaceDeleteInvalidPath ["..", "outside.md"]))
+    (WorkspaceDeleteFailed (WorkspacePathInvalidPath ["..", "outside.md"]))
     invalidPathDelete
   essayDirectoryDelete <- deleteWorkspaceEssay workspace ["History"]
   assertEqual "essay delete identifies directory targets"
-    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History"]))
+    (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History"]))
     essayDirectoryDelete
   directoryEssayDelete <- deleteWorkspaceDirectory workspace ["History", "French-Revolution"]
   assertEqual "directory delete rejects essay directories"
-    (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType ["History", "French-Revolution"]))
+    (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History", "French-Revolution"]))
     directoryEssayDelete
   rootDelete <- deleteWorkspaceDirectory workspace []
   assertEqual "workspace root deletion is denied"
-    (WorkspaceDeleteFailed WorkspaceDeleteRootDenied)
+    (WorkspaceDeleteFailed WorkspacePathRootDenied)
     rootDelete
   let outsideFile = cachePath </> "outside.md"
       linkedEssay = rootPath </> "History" </> "linked.md"
@@ -240,7 +240,7 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   createFileLink outsideFile linkedEssay
   symlinkDelete <- deleteWorkspaceEssay workspace ["History", "linked.md"]
   assertEqual "essay symlink failure reports its exact path"
-    (WorkspaceDeleteFailed (WorkspaceDeleteSymbolicLink ["History", "linked.md"]))
+    (WorkspaceDeleteFailed (WorkspacePathSymbolicLink ["History", "linked.md"]))
     symlinkDelete
   removeFile linkedEssay
   didDeleteEssay <- deleteWorkspaceEssay workspace ["History", "French-Revolution"]

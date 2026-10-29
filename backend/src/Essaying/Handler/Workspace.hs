@@ -33,7 +33,7 @@ import Essaying.Types.Workspace
   , WorkspaceNode (..)
   , WorkspaceTreeResponse (..)
   , SaveWorkspaceEssayRequest (..)
-  , WorkspaceDeleteError (..)
+  , WorkspacePathError (..)
   , WorkspaceDeleteResult (..)
   )
 import Essaying.Types.Storage (WorkspaceRoot)
@@ -66,23 +66,27 @@ deleteWorkspaceEssayHandler :: Text -> [Text] -> Handler NoContent
 deleteWorkspaceEssayHandler accountIdText essayPath = do
   wsRoot <- resolveWorkspaceRoot accountIdText
   result <- liftIO $ deleteWorkspaceEssay wsRoot essayPath
-  handleWorkspaceDeleteResult result
+  case result of
+    WorkspaceDeleteSucceeded -> pure NoContent
+    WorkspaceDeleteFailed pathError -> handleWorkspacePathError pathError
 
 deleteWorkspaceDirectoryHandler :: Text -> [Text] -> Handler NoContent
 deleteWorkspaceDirectoryHandler accountIdText directoryPath = do
   wsRoot <- resolveWorkspaceRoot accountIdText
   result <- liftIO $ deleteWorkspaceDirectory wsRoot directoryPath
-  handleWorkspaceDeleteResult result
+  case result of
+    WorkspaceDeleteSucceeded -> pure NoContent
+    WorkspaceDeleteFailed pathError -> handleWorkspacePathError pathError
 
-handleWorkspaceDeleteResult :: WorkspaceDeleteResult -> Handler NoContent
-handleWorkspaceDeleteResult WorkspaceDeleteSucceeded = pure NoContent
-handleWorkspaceDeleteResult (WorkspaceDeleteFailed deleteError) =
-  case deleteError of
-    WorkspaceDeleteInvalidPath _ -> throwError err400
-    WorkspaceDeleteRootDenied -> throwError err400
-    WorkspaceDeleteTargetNotFound _ -> throwError err404
-    WorkspaceDeleteWrongTargetType _ -> throwError err400
-    WorkspaceDeleteSymbolicLink _ -> throwError err403
+handleWorkspacePathError :: WorkspacePathError -> Handler a
+handleWorkspacePathError pathError =
+  case pathError of
+    WorkspacePathInvalidPath _ -> throwError err400
+    WorkspacePathNestedEssay _ -> throwError err400
+    WorkspacePathRootDenied -> throwError err400
+    WorkspacePathTargetNotFound _ -> throwError err404
+    WorkspacePathWrongTargetType _ -> throwError err400
+    WorkspacePathSymbolicLink _ -> throwError err403
 
 -- | Resolve the on-disk workspace root for the given account.
 resolveWorkspaceRoot :: Text -> Handler WorkspaceRoot

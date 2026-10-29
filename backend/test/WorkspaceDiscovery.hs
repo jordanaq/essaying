@@ -10,7 +10,7 @@ import Essaying.Persistence.Workspace
   , loadWorkspaceEssay, saveWorkspaceEssay )
 import Essaying.Types.Storage (WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryResult (..), CreateWorkspaceEssayResult (..), WorkspaceDeleteError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
+  ( CreateWorkspaceDirectoryResult (..), CreateWorkspaceEssayResult (..), WorkspacePathError (..), WorkspaceDeleteResult (..), WorkspaceEssayContent (..)
   , WorkspaceNode (..), WorkspaceNodeType (..) )
 import System.Directory
   ( createDirectory, createDirectoryLink, createFileLink, getTemporaryDirectory
@@ -130,7 +130,7 @@ tests = TestLabel "essay directory discovery" $ TestList
         writeFile (root </> "Essay" </> "References" </> "Notes" </> "source.md") "Keep source"
         let target = ["Essay", "References", "Notes"]
         assertEqual "an earlier essay ancestor blocks folder deletion"
-          (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType target))
+          (WorkspaceDeleteFailed (WorkspacePathNestedEssay target))
           =<< deleteWorkspaceDirectory workspace target
         assertEqual "reference contents survive" "Keep source"
           =<< readFile (root </> "Essay" </> "References" </> "Notes" </> "source.md")
@@ -142,7 +142,7 @@ tests = TestLabel "essay directory discovery" $ TestList
         writeFile (root </> "Essay" </> "Nested" </> "essay.md") "Keep inner"
         let target = ["Essay", "Nested"]
         assertEqual "an essay cannot be deleted from inside another essay"
-          (WorkspaceDeleteFailed (WorkspaceDeleteWrongTargetType target))
+          (WorkspaceDeleteFailed (WorkspacePathNestedEssay target))
           =<< deleteWorkspaceEssay workspace target
         assertEqual "nested draft survives" "Keep inner"
           =<< readFile (root </> "Essay" </> "Nested" </> "essay.md")
@@ -326,6 +326,24 @@ tests = TestLabel "essay directory discovery" $ TestList
           =<< readFile (root </> "New Essay/prompt.md")
         assertEqual "draft is retained on disk" "Draft"
           =<< readFile (root </> "New Essay/essay.md")
+  , TestLabel "loading and saving reject essays inside essays" $ TestCase $
+      withWorkspace $ \root workspace -> do
+        createDirectory (root </> "Outer")
+        writeFile (root </> "Outer/essay.md") "Keep outer"
+        createDirectory (root </> "Outer/Inner")
+        writeFile (root </> "Outer/Inner/essay.md") "Keep inner"
+        writeFile (root </> "Outer/Inner/prompt.md") "Keep assignment"
+        let target = ["Outer", "Inner"]
+        assertEqual "nested essay does not load" Nothing
+          =<< loadWorkspaceEssay workspace target
+        assertEqual "nested draft save is rejected" False
+          =<< saveWorkspaceEssay workspace target Nothing (Just "Do not write")
+        assertEqual "nested prompt save is rejected" False
+          =<< saveWorkspaceEssay workspace target (Just "Do not write") Nothing
+        assertEqual "nested draft is unchanged" "Keep inner"
+          =<< readFile (root </> "Outer/Inner/essay.md")
+        assertEqual "nested prompt is unchanged" "Keep assignment"
+          =<< readFile (root </> "Outer/Inner/prompt.md")
   , TestLabel "ordinary essay and folder deletion remain available" $ TestCase $
       withWorkspace $ \root workspace -> do
         createDirectory (root </> "History")

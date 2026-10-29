@@ -121,6 +121,19 @@ tests = TestList
         =<< readFile (root </> "Essay/essay.md")
       save "{\"markdown\":\"\"}" "Assignment" ""
       save "{\"prompt\":\"\"}" "" ""
+  , TestLabel "nested essay and folder deletion return HTTP 400" $ TestCase $ withWorkspace $ \root -> do
+      createDirectory (root </> "Outer")
+      writeFile (root </> "Outer/essay.md") "Keep outer"
+      createDirectory (root </> "Outer/Inner")
+      writeFile (root </> "Outer/Inner/essay.md") "Keep inner"
+      createDirectory (root </> "Outer/References")
+      writeFile (root </> "Outer/References/source.md") "Keep reference"
+      forM_ ["/api/v1/accounts/alice/workspace/essays/Outer/Inner",
+        "/api/v1/accounts/alice/workspace/directories/Outer/References"] $ \url -> do
+          response <- call "DELETE" url ""
+          assertEqual "nested target maps to bad request" 400 (statusCode (simpleStatus response))
+      assertEqual "nested essay survives" "Keep inner" =<< readFile (root </> "Outer/Inner/essay.md")
+      assertEqual "nested folder survives" "Keep reference" =<< readFile (root </> "Outer/References/source.md")
   , TestLabel "request decoding failures use a JSON envelope" $ TestCase $ withWorkspace $ \_ -> do
       forM_ [("GET", base, ""), ("GET", base <> "/effective", ""), ("POST", base, "{"),
         ("GET", "/api/v1/accounts/alice/workspace/%63ontext", ""), ("POST", base, "{}"), ("POST", base, "{\"path\":\"context.json\",\"contextLayer\":{},\"extra\":true}"),
