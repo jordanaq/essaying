@@ -50,6 +50,7 @@ import Essaying.Types.Context
   , RubricOverride (..)
   , ScalarOverride (..)
   )
+import Essaying.Types.Ai (PromptRequest (..), PromptResponse (..), GradeRequest (..), GradeResponse (..))
 import Essaying.Types.Context qualified as ContextType (ContextLayer (..))
 import Essaying.Types.Health (HealthResponse (..), ReadyResponse (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
@@ -99,6 +100,8 @@ type WorkspaceClientRoutes =
       :<|> (ContextWriteRequest -> ClientM ContextLayer)
       :<|> (ContextWriteRequest -> ClientM ContextLayer)
       :<|> (DeleteContextRequest -> ClientM NoContent))
+    :<|> ((PromptRequest -> ClientM PromptResponse)
+      :<|> (GradeRequest -> ClientM GradeResponse))
 
 accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
 (healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
@@ -766,7 +769,7 @@ contextApiMutations = TestCase $
         manager <- newManager defaultManagerSettings
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
             _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "contextapi"
-            _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> contextRoutes = workspaceRoutes
+            _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> contextRoutes :<|> _ = workspaceRoutes
             _ :<|> _ :<|> createLayer :<|> updateLayer :<|> deleteLayer = contextRoutes
             layer = ContextType.ContextLayer Nothing Nothing Nothing Nothing Nothing Nothing Nothing
             updated = layer {ContextType.title = Just (SetScalar "Updated")}

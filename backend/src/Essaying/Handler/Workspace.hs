@@ -5,10 +5,11 @@ module Essaying.Handler.Workspace
   )
 where
 
-import Essaying.API.V1 (ContextApi)
+import Essaying.API.V1 (AiApi, ContextApi)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (IOException, try)
 import Essaying.Handler.ContextError (contextError)
+import Essaying.Handler.Ai (aiHandler)
 import Essaying.Persistence.Account (readAccountProfile)
 import Data.Text (Text)
 import Essaying.Handler.Context (contextHandler)
@@ -47,6 +48,7 @@ workspaceHandler ::
     :<|> ([Text] -> Handler NoContent)
     :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
     :<|> Server ContextApi
+    :<|> Server AiApi
 workspaceHandler accountIdText =
   listWorkspaceTreeHandler accountIdText
     :<|> essayRoutes accountIdText
@@ -54,6 +56,7 @@ workspaceHandler accountIdText =
     :<|> deleteWorkspaceDirectoryHandler accountIdText
     :<|> createWorkspaceDirectoryHandler accountIdText
     :<|> contextHandler (resolveContextWorkspaceRoot accountIdText)
+    :<|> aiHandler (AccountId accountIdText)
 
 essayRoutes :: Text -> [Text] -> Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)
 essayRoutes accountIdText essayPath =

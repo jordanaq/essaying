@@ -48,7 +48,7 @@ type Api =
                                                     :<|> "directories" :> CaptureAll "path" Text :> DeleteNoContent
                                                     :<|> "directories" :> ReqBody '[JSON] CreateWorkspaceDirectoryRequest :> PostCreated '[JSON] WorkspaceNode
                                                     :<|> "context" :> ContextApi
-                                                    -- TODO: :<|> "ai" :> AiApi
+                                                    :<|> "ai" :> AiApi
                                                )
                                    )
                        )

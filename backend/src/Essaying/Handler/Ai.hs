@@ -64,6 +64,7 @@ handlePromptProviderError ModelNotSelected = err422 { errBody = "No model select
 handlePromptProviderError PromptProviderNotImplemented = err501 { errBody = "Prompt provider not implemented" }
 handlePromptProviderError (GenerationFailed _) = err502 { errBody = "Prompt generation failed" }
 handlePromptProviderError (ProviderConfigurationMissing _) = err500 { errBody = "Provider configuration missing " }
+handlePromptProviderError (ProviderHttpError code _) = err502 { errBody = "The provider rejected the request" }
 
 gradeHandler :: WorkspaceRoot -> AccountProfile -> GradeRequest -> Handler GradeResponse
-gradeHandler workspaceRoot accountProfile gradeRequest = undefined
+gradeHandler workspaceRoot accountProfile gradeRequest = throwError err501 { errBody = "Grade handler not implemented" }

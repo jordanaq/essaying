@@ -58,6 +58,7 @@ data PromptProviderError
   = ModelNotSelected
   | PromptProviderNotImplemented
   | ProviderConfigurationMissing Text
+  | ProviderHttpError Int (Maybe Text)
   | GenerationFailed Text
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

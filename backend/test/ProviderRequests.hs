@@ -7,20 +7,24 @@ import Control.Concurrent (threadDelay)
 import Data.Aeson (Value (..), eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
 import Data.Map.Strict qualified as Map
+import Data.IORef (newIORef, readIORef, modifyIORef')
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.ByteString.Lazy qualified as BL
 import Essaying.Provider.OpenAiCompatible
-  ( OpenAiProviderConfig (..), buildPromptRequest, buildPromptRequestBody, promptGenerationTask, sendPromptRequest, decodePromptResponse )
+  ( OpenAiProviderConfig (..), buildPromptRequest, buildPromptRequestBody, promptGenerationTask, generatePromptsWith
+  , sendPromptRequest, decodePromptResponse, decodePromptHttpResponse, decodeProviderErrorMessage
+  )
 import Essaying.Types.Ai (PromptProviderError (..))
 import Essaying.Types.Context (EffectiveContext (..))
 import Network.HTTP.Client
-  ( Request (..), RequestBody (RequestBodyLBS), newManager
-  , defaultManagerSettings, responseBody, responseStatus, responseTimeoutMicro
+  ( Request (..), RequestBody (RequestBodyLBS), Response, newManager
+  , defaultManagerSettings, responseBody, responseStatus, responseTimeoutMicro, managerSetProxy, noProxy
   )
-import Network.HTTP.Types (status200)
+import Network.HTTP.Types (status200, mkStatus)
 import Network.Wai (responseLBS)
+import Network.Wai qualified as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
@@ -88,7 +92,118 @@ tests = TestList
           Left err -> assertFailure ("unexpected provider error: " <> show err)
           Right _ -> assertFailure "expected a timeout to become a provider error"
   , decoderTests
+  , httpResponseTests
+  , errorMessageTests
+  , generationWorkerTest
   ]
+
+generationWorkerTest :: Test
+generationWorkerTest = TestLabel "generation worker uses a fake provider and recorded response" $ TestCase $ do
+  recorded <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.response.json"
+  expectedBytes <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.expected.json"
+  expected <- case eitherDecode expectedBytes :: Either String [Text] of
+    Left err -> assertFailure ("invalid expected fixture: " <> err) >> pure []
+    Right options -> pure options
+  received <- newIORef []
+  let context = EffectiveContext (Just "Hume and Kierkegaard") (Just "Philosophy students")
+        Nothing ["religion"] ["Compare arguments fairly."] [] Map.empty
+      instructions = Just "Generate three distinct assignment options."
+      app request respond = do
+        bytes <- Wai.strictRequestBody request
+        modifyIORef' received
+          ((Wai.requestMethod request, Wai.rawPathInfo request, Wai.requestHeaders request, bytes) :)
+        respond (responseLBS status200 [("Content-Type", "application/json")] recorded)
+  testWithApplication (pure app) $ \port -> do
+    manager <- newManager (managerSetProxy noProxy defaultManagerSettings)
+    let config = OpenAiProviderConfig
+          (Text.pack ("http://127.0.0.1:" <> show port <> "/v1/")) "test-key"
+    result <- generatePromptsWith manager config "gpt-6.1-sol" context instructions
+    assertEqual "worker returns every recorded option, unchanged and in order" (Right expected) result
+    requests <- readIORef received
+    case requests of
+      [(methodValue, pathValue, headers, bytes)] -> do
+        assertEqual "one POST to the fake provider" "POST" methodValue
+        assertEqual "provider endpoint" "/v1/chat/completions" pathValue
+        assertEqual "only a literal fake key" (Just "Bearer test-key") (lookup "Authorization" headers)
+        assertEqual "JSON content type" (Just "application/json") (lookup "Content-Type" headers)
+        case eitherDecode bytes >>= parseEither parseEnvelope of
+          Left err -> assertFailure ("invalid outgoing request: " <> err)
+          Right (selectedModel, streaming, messages) -> do
+            assertEqual "selected model" "gpt-6.1-sol" selectedModel
+            assertEqual "non-streaming request" False streaming
+            case messages of
+              [("system", task), ("user", inputText)] -> do
+                assertEqual "generation task" promptGenerationTask task
+                assertEqual "context and extra instructions reach the provider"
+                  (Right (object ["context" .= context, "instructions" .= instructions]))
+                  (eitherDecodeStrict' (TextEncoding.encodeUtf8 inputText) :: Either String Value)
+              _ -> assertFailure "expected the system task and user input"
+      _ -> assertFailure "expected exactly one request to the fake provider"
+
+httpResponseTests :: Test
+httpResponseTests = TestLabel "provider HTTP response handling" $ TestList $
+  [ TestLabel "recorded response traverses real request, transport, and decoder" $ TestCase $ do
+      bytes <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.response.json"
+      expectedBytes <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.expected.json"
+      case eitherDecode expectedBytes :: Either String [Text] of
+        Left err -> assertFailure ("invalid expected fixture: " <> err)
+        Right expected -> withLocalResponse 200 bytes $ \response ->
+          assertEqual "all recorded Markdown options survive the HTTP round trip"
+            (Right expected) (decodePromptHttpResponse response)
+  , TestLabel "malformed successful response is a decoding failure" $ TestCase $
+      withLocalResponse 200 "not JSON" $ \response ->
+        case decodePromptHttpResponse response of
+          Left (GenerationFailed _) -> pure ()
+          other -> assertFailure ("expected decoding failure, got " <> show other)
+  ] <> map statusCase
+    [ (401, errorBody "  Invalid credentials.  ", Just "Invalid credentials.")
+    , (403, errorBody "Access denied.", Just "Access denied.")
+    , (404, errorBody "Unknown model.", Just "Unknown model.")
+    , (429, errorBody "Rate limit exceeded.", Just "Rate limit exceeded.")
+    , (500, "<html>Server error</html>", Nothing)
+    , (503, contentCompletion "{\"prompts\":[\"Looks successful\"]}", Nothing)
+    ]
+  where
+    statusCase (code, bytes, message) = TestLabel ("preserve HTTP " <> show code) $ TestCase $
+      withLocalResponse code bytes $ \response ->
+        assertEqual "HTTP errors stay distinct from successful prompt output"
+          (Left (ProviderHttpError code message)) (decodePromptHttpResponse response)
+
+-- Uses the real builder and sender, but only a short-lived loopback server.
+withLocalResponse :: Int -> BL.ByteString -> (Response BL.ByteString -> IO ()) -> IO ()
+withLocalResponse code bytes check =
+  testWithApplication (pure (\_ respond -> respond (responseLBS (mkStatus code "Fixture") [] bytes))) $ \port -> do
+    manager <- newManager defaultManagerSettings
+    request <- buildPromptRequest
+      (OpenAiProviderConfig (Text.pack ("http://127.0.0.1:" <> show port <> "/v1")) "test-key")
+      (object [])
+    result <- sendPromptRequest manager request {proxy = Nothing}
+    case result of
+      Left err -> assertFailure ("unexpected transport failure: " <> show err)
+      Right response -> check response
+
+errorBody :: Text -> BL.ByteString
+errorBody message = encode (object ["error" .= object ["message" .= message]])
+
+errorMessageTests :: Test
+errorMessageTests = TestLabel "provider error message decoding" $ TestList $
+  [ TestLabel "UTF-8 message is decoded and trimmed" $ TestCase $
+      assertEqual "only the nested message is retained" (Just "Café: modèle indisponible. 宗教")
+        (decodeProviderErrorMessage (errorBody " \nCafé: modèle indisponible. 宗教\t "))
+  ] <> map absent
+    [ ("malformed JSON", "not JSON")
+    , ("HTML response", "<html>Bad gateway</html>")
+    , ("invalid UTF-8", BL.pack [255])
+    , ("missing error", "{}")
+    , ("wrong error shape", "{\"error\":\"Failure\"}")
+    , ("missing message", "{\"error\":{}}")
+    , ("null message", "{\"error\":{\"message\":null}}")
+    , ("non-text message", "{\"error\":{\"message\":42}}")
+    , ("blank message", errorBody " \n\t ")
+    ]
+  where
+    absent (label, bytes) = TestLabel label $ TestCase $
+      assertEqual "unusable error body has no message" Nothing (decodeProviderErrorMessage bytes)
 
 decoderTests :: Test
 decoderTests = TestLabel "prompt response decoder" $ TestList $

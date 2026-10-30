@@ -6,7 +6,7 @@ module Essaying.Handler.Account
 where
 
 import Data.Text (Text)
-import Essaying.API.V1 (ContextApi)
+import Essaying.API.V1 (AiApi, ContextApi)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
 import Essaying.Handler.Workspace (workspaceHandler)
@@ -43,6 +43,7 @@ type WorkspaceRoutes =
     :<|> ([Text] -> Handler NoContent)
     :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
     :<|> Server ContextApi
+    :<|> Server AiApi
 
 accountHandler ::
   Handler [AccountProfile]
