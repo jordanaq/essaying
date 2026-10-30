@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import ContextPanel from "./ContextPanel.svelte";
+  import PromptGenerator from "./PromptGenerator.svelte";
+  import { defaultModel, providerModels } from "./provider-models";
   import { createContextPreview, contextSelection } from "./context-preview";
   import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
   import "@shoelace-style/shoelace/dist/components/badge/badge.js";
@@ -74,6 +76,7 @@
   let selectedWorkspaceEssay: WorkspaceEssayContent | null = null;
   let markdown = "";
   let prompt = "";
+  let assignmentEditor: { focus: () => void } | undefined;
   let savingPrompt = false;
   let essayLoading = false;
   let loadingEssayPath: string[] | null = null;
@@ -92,13 +95,13 @@
   $: hasUnsavedChanges = draftDirty || promptDirty || contextDirty;
   $: operationPending = savingDraft || savingPrompt || contextBusy || workspaceCreateBusy || workspaceDeleteBusy;
   $: canGrade = contextReady && !hasUnsavedChanges && !operationPending && !essayLoading;
-  let model = "llama3.1:8b";
+  let model = defaultModel;
   let accounts: AccountProfile[] = [];
   let loadingAccounts = false;
   let creatingAccount = false;
   let accountError = "";
   let newAccountName = "";
-  let newAccountModel = "llama3.1:8b";
+  let newAccountModel = defaultModel;
   let activeAccountId: string | null = null;
   const contextPreview = createContextPreview();
   $: contextReady = selectedWorkspaceEssay !== null
@@ -699,6 +702,19 @@
     }
   }
 
+  function adoptPrompt(candidate: string) {
+    if (!selectedWorkspaceEssay || !contextReady || contextDirty || operationPending || essayLoading || workspaceLoading) return;
+    if (candidate === prompt) return;
+    if (promptDirty && !window.confirm("Replace your unsaved assignment prompt changes with this generated prompt?")) return;
+    // Update only the editor value. The saved baseline stays unchanged so normal
+    // dirty-state, discard, navigation protection, and Save Prompt still apply.
+    prompt = candidate;
+    promptError = "";
+    promptNotice = "Generated prompt applied. Save Prompt to keep it.";
+    status = "Generated prompt applied. Save Prompt to keep it.";
+    assignmentEditor?.focus();
+  }
+
   function handleModelChange(e: Event) {
     model = (e.target as { value?: string }).value ?? model;
   }
@@ -928,9 +944,9 @@
               value={newAccountModel}
               on:sl-change={(e: Event) => (newAccountModel = (e.target as { value?: string }).value ?? "")}
             >
-              <sl-option value="llama3.1:8b">llama3.1:8b</sl-option>
-              <sl-option value="qwen2.5:7b">qwen2.5:7b</sl-option>
-              <sl-option value="mistral:7b">mistral:7b</sl-option>
+              {#each providerModels as modelId}
+                <sl-option value={modelId}>{modelId}</sl-option>
+              {/each}
             </sl-select>
           </div>
 
@@ -1112,13 +1128,13 @@
       {#if panelState.editor}
         <div class="meta">
           <sl-select label="Model" value={model} on:sl-change={handleModelChange}>
-            <sl-option value="llama3.1:8b">llama3.1:8b</sl-option>
-            <sl-option value="qwen2.5:7b">qwen2.5:7b</sl-option>
-            <sl-option value="mistral:7b">mistral:7b</sl-option>
+            {#each providerModels as modelId}
+              <sl-option value={modelId}>{modelId}</sl-option>
+            {/each}
           </sl-select>
 
           <section class="assignment-editor" aria-label="Assignment prompt editor">
-            <sl-textarea label="Assignment prompt" rows="5" value={prompt}
+            <sl-textarea bind:this={assignmentEditor} label="Assignment prompt" rows="5" value={prompt}
               disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
               on:sl-input={(event: Event) => { prompt = (event.target as { value?: string }).value ?? prompt; promptNotice = ""; }}
               placeholder="Describe the assignment, question, or requirements."></sl-textarea>
@@ -1134,6 +1150,15 @@
               <span class="footer-note" role="status">{promptDirty ? "Unsaved prompt changes" : promptNotice || (selectedWorkspaceEssay ? "Prompt saved" : "Select an essay")}</span>
             </div>
             {#if promptError}<p class="login-error" role="alert">{promptError}</p>{/if}
+            {#if activeAccountId && selectedWorkspaceEssay}
+              {#key JSON.stringify([activeAccountId, selectedWorkspaceEssay.path, essayRevision])}
+                <PromptGenerator accountId={activeAccountId} essayPath={selectedWorkspaceEssay.path}
+                  {contextReady} {contextDirty}
+                  onAdopt={adoptPrompt}
+                  unavailableReason={essayLoading || workspaceLoading ? "Wait for the essay to finish loading."
+                    : operationPending ? "Wait for the current save or workspace change to finish." : ""} />
+              {/key}
+            {/if}
           </section>
           <sl-textarea
             label="Essay Markdown"

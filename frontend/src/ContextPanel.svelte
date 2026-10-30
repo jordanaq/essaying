@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { providerModels } from "./provider-models";
   import { contextRequest, ContextApiError, type ContextLayer } from "./context-api";
   import { createContextPreview } from "./context-preview";
 
@@ -192,6 +193,9 @@
   {#if loading}
     <p role="status">Loading context…</p>
   {:else}
+    <datalist id="provider-model-options">
+      {#each providerModels as modelId}<option value={modelId}></option>{/each}
+    </datalist>
     <form on:submit|preventDefault={() => mutate()} on:input={() => { dirty = true; notice = ""; }} on:change={() => { dirty = true; notice = ""; }}>
       <fieldset disabled={busy || !!error && !dirty}>
         {#each fields as field}
@@ -200,7 +204,8 @@
             <select id={`context-${field.key}-mode`} aria-label={`${field.label} behavior`} bind:value={field.mode}>
               <option value="inherit">Inherit</option><option value="SetScalar">Set value</option><option value="ClearScalar">Clear</option>
             </select>
-            {#if field.mode === "SetScalar"}<input class="field-value" aria-label={field.label} bind:value={field.value} required placeholder={`Enter ${field.label.toLowerCase()}`} />{/if}
+            {#if field.mode === "SetScalar"}<input class="field-value" aria-label={field.label} bind:value={field.value} required placeholder={`Enter ${field.label.toLowerCase()}`}
+              list={field.key === "model" ? "provider-model-options" : undefined} />{/if}
           </div>
         {/each}
         {#each lists as field}

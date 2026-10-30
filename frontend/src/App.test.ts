@@ -78,6 +78,64 @@ describe("App account login flow", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
 
+  it("adopts a candidate on double-click, protects unsaved prompts, and saves only the prompt", async () => {
+    localStorage.setItem("essay-account-id", "alice");
+    let essay = { path: ["Religion"], title: "Religion", prompt: "Original assignment", markdown: "Original draft" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/accounts")) return responseFromApiResponse(jsonResponse(200, [
+        { accountId: { unAccountId: "alice" }, displayName: "Alice", preferredModel: "gpt-6.1-sol" }
+      ]));
+      if (url.endsWith("/workspace")) return responseFromApiResponse(jsonResponse(200, { tree: [
+        { name: "Religion", path: essay.path, nodeType: "WorkspaceEssayNode", children: [] }
+      ] }));
+      if (url.includes("/context/effective")) return responseFromApiResponse(jsonResponse(200, {
+        title: null, audience: null, model: "gpt-6.1-sol", tags: [], instructions: [], grading_directions: [], rubric: {}
+      }));
+      if (url.includes("/context")) return responseFromApiResponse(jsonResponse(404, { error: { message: "Context does not exist." } }));
+      if (url.endsWith("/ai/prompt")) return responseFromApiResponse(jsonResponse(200, { prompts: ["Compare Hume and Kierkegaard.", "Evaluate evidence and faith."] }));
+      if (url.endsWith("/essays/Religion")) {
+        if (init?.method === "PUT") essay = { ...essay, ...JSON.parse(String(init.body)) };
+        return responseFromApiResponse(jsonResponse(200, essay));
+      }
+      return new Response("", { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(App);
+    await screen.findByText("Currently editing Religion.");
+    const editor = (label: string) => Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string }>("sl-textarea"))
+      .find((element) => element.label === label)!;
+    const promptEditor = editor("Assignment prompt");
+    const draftEditor = editor("Essay Markdown");
+    draftEditor.value = "Unsaved draft";
+    await fireEvent(draftEditor, new CustomEvent("sl-input"));
+    await fireEvent.click(screen.getByText("Generate prompts", { selector: "summary" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled());
+    await fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    const first = await screen.findByRole("article", { name: "Prompt option 1" });
+    await fireEvent.doubleClick(first);
+    expect(promptEditor.value).toBe("Compare Hume and Kierkegaard.");
+    expect(screen.getByText("Unsaved prompt changes")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(0);
+    expect(draftEditor.value).toBe("Unsaved draft");
+
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    await fireEvent.click(screen.getByRole("button", { name: "Use prompt option 2" }));
+    expect(window.confirm).toHaveBeenCalledWith("Replace your unsaved assignment prompt changes with this generated prompt?");
+    expect(promptEditor.value).toBe("Compare Hume and Kierkegaard.");
+    await fireEvent.click(screen.getByRole("button", { name: "Use prompt option 2" }));
+    expect(promptEditor.value).toBe("Evaluate evidence and faith.");
+    await fireEvent.click(screen.getByText("Discard prompt changes"));
+    expect(promptEditor.value).toBe("Original assignment");
+    await fireEvent.doubleClick(first);
+    await fireEvent.click(screen.getByText("Save Prompt"));
+    await screen.findByText("Prompt saved.");
+    const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0]![1]?.body))).toEqual({ prompt: "Compare Hume and Kierkegaard." });
+    expect(draftEditor.value).toBe("Unsaved draft");
+  });
+
   it("shows login gate with available accounts when logged out", async () => {
     const fetchMock = createApiAwareFetchMock([
       jsonResponse(200, [
