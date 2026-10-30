@@ -94,6 +94,12 @@
   let essayRevision = 0;
   $: draftDirty = selectedWorkspaceEssay !== null && markdown !== selectedWorkspaceEssay.markdown;
   $: promptDirty = selectedWorkspaceEssay !== null && prompt !== selectedWorkspaceEssay.prompt;
+  $: draftSaveStatus = essayLoading ? "Loading draft…" : !selectedWorkspaceEssay ? "Select an essay"
+    : savingDraft ? "Saving draft…" : draftError ? "Draft not saved. Your edits are still here; try saving again."
+    : draftDirty ? "Unsaved draft changes" : draftNotice || "Draft saved";
+  $: promptSaveStatus = essayLoading ? "Loading prompt…" : !selectedWorkspaceEssay ? "Select an essay"
+    : savingPrompt ? "Saving prompt…" : promptError ? "Prompt not saved. Your edits are still here; try saving again."
+    : promptDirty ? "Unsaved prompt changes" : promptNotice || "Prompt saved";
   $: hasUnsavedChanges = draftDirty || promptDirty || contextDirty;
   $: operationPending = savingDraft || savingPrompt || contextBusy || workspaceCreateBusy || workspaceDeleteBusy;
   $: rubricWeights = Object.values($contextPreview.context?.rubric ?? {}).map((criterion) => criterion.weight);
@@ -729,10 +735,11 @@
       selectedWorkspaceEssay = { ...selectedWorkspaceEssay, [field]: saved[field] };
       if (field === "markdown") draftNotice = "Draft saved.";
       else promptNotice = "Prompt saved.";
-      status = `${field === "markdown" ? "Draft" : "Prompt"} saved for ${pathToLabel(essayPath)}`;
+      const newerEdits = (field === "markdown" ? markdown : prompt) !== saved[field];
+      status = `${field === "markdown" ? "Draft" : "Prompt"} saved for ${pathToLabel(essayPath)}${newerEdits ? ". Newer changes are still unsaved." : ""}`;
     } catch (err) {
       if (accountId !== activeAccountId || revision !== essayRevision) return;
-      const message = `Could not save ${field === "markdown" ? "draft" : "prompt"}: ${String(err)}`;
+      const message = `Could not save ${field === "markdown" ? "draft" : "prompt"}: ${err instanceof Error ? err.message : String(err)}`;
       if (field === "markdown") draftError = message;
       else promptError = message;
     } finally {
@@ -1186,7 +1193,7 @@
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
               <sl-button variant="text" disabled={!promptDirty || savingPrompt}
                 on:click={() => { prompt = selectedWorkspaceEssay?.prompt ?? ""; promptError = promptNotice = ""; }}>Discard prompt changes</sl-button>
-              <span class="footer-note" role="status">{promptDirty ? "Unsaved prompt changes" : promptNotice || (selectedWorkspaceEssay ? "Prompt saved" : "Select an essay")}</span>
+              <span class="footer-note" role="status" aria-label="Prompt save status" aria-atomic="true">{promptSaveStatus}</span>
             </div>
             {#if promptError}<p class="login-error" role="alert">{promptError}</p>{/if}
             {#if activeAccountId && selectedWorkspaceEssay}
@@ -1211,7 +1218,7 @@
         <div class="editor-actions">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="primary" on:click={() => saveEssayField("markdown")} disabled={savingDraft || essayLoading || selectedWorkspaceEssay === null}>
-            {savingDraft ? "Saving..." : "Save Draft"}
+            {savingDraft ? "Saving draft…" : "Save Draft"}
           </sl-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="text" disabled={!draftDirty || savingDraft}
@@ -1220,7 +1227,7 @@
           <sl-button variant="default" on:click={requestGrade} disabled={!canGrade} aria-describedby={canGrade ? undefined : "grade-context-status"}>{grading ? "Grading…" : "Grade essay"}</sl-button>
         </div>
         {#if draftError}<p class="login-error" role="alert">{draftError}</p>{/if}
-        {#if selectedWorkspaceEssay}<p class="footer-note" role="status">{draftDirty ? "Unsaved draft changes" : draftNotice || "Draft saved"}</p>{/if}
+        <p class="footer-note" role="status" aria-label="Draft save status" aria-atomic="true">{draftSaveStatus}</p>
         {#if essayLoading}<p class="footer-note" role="status">Loading essay…</p>{/if}
         {#if !canGrade}<p id="grade-context-status" class="footer-note" role="status">{grading ? "Grading your saved essay…" : gradeUnavailable}</p>{/if}
         {#if selectedWorkspaceEssay}
