@@ -1,6 +1,6 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 
--- Run from backend/. Generates fixtures only; never reads a key or calls an API.
+-- | Run from backend/. Generates fixtures only; never reads a key or calls an API.
 module Main where
 
 import Data.Aeson (encode)
@@ -15,6 +15,8 @@ import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath ((</>))
 
+-- | Resolve the saved sample inputs and write the production-built JSON request.
+-- This helper neither loads credentials nor sends the request.
 main :: IO ()
 main = do
   args <- getArgs

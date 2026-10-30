@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Prompt request, shared transport, and recorded-response regression coverage.
+-- Network cases use short-lived loopback providers and literal fake credentials.
 module ProviderRequests (tests) where
 
 import Control.Monad (forM_)
@@ -30,6 +32,7 @@ import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
 -- Construction tests never send requests. Transport tests use a temporary
 -- loopback server, fake credentials, and requests with proxies disabled.
+-- | Exercise request encoding, shared HTTP behavior, and prompt decoding.
 tests :: Test
 tests = TestList
   [ TestLabel "custom provider URL and authentication" $ TestCase $
@@ -105,6 +108,7 @@ tests = TestList
   , generationWorkerTest
   ]
 
+-- | Replay a recorded response through the real prompt worker and inspect its request.
 generationWorkerTest :: Test
 generationWorkerTest = TestLabel "generation worker uses a fake provider and recorded response" $ TestCase $ do
   recorded <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.response.json"
@@ -148,6 +152,7 @@ generationWorkerTest = TestLabel "generation worker uses a fake provider and rec
               _ -> assertFailure "expected the system task and user input"
       _ -> assertFailure "expected exactly one request to the fake provider"
 
+-- | Check successful decoding and preservation of non-success HTTP status codes.
 httpResponseTests :: Test
 httpResponseTests = TestLabel "provider HTTP response handling" $ TestList $
   [ TestLabel "recorded response traverses real request, transport, and decoder" $ TestCase $ do
@@ -177,7 +182,7 @@ httpResponseTests = TestLabel "provider HTTP response handling" $ TestList $
         assertEqual "HTTP errors stay distinct from successful prompt output"
           (Left (ProviderHttpError code message)) (decodePromptHttpResponse response)
 
--- Uses the real builder and sender, but only a short-lived loopback server.
+-- | Uses the real builder and sender, but only a short-lived loopback server.
 withLocalResponse :: Int -> BL.ByteString -> (Response BL.ByteString -> IO ()) -> IO ()
 withLocalResponse code bytes check =
   testWithApplication (pure (\_ respond -> respond (responseLBS (mkStatus code "Fixture") [] bytes))) $ \port -> do
@@ -190,9 +195,11 @@ withLocalResponse code bytes check =
       Left err -> assertFailure ("unexpected transport failure: " <> show err)
       Right response -> check response
 
+-- | Encode a synthetic upstream error envelope with a supplied message.
 errorBody :: Text -> BL.ByteString
 errorBody message = encode (object ["error" .= object ["message" .= message]])
 
+-- | Check private diagnostic extraction without falling back to raw response bodies.
 errorMessageTests :: Test
 errorMessageTests = TestLabel "provider error message decoding" $ TestList $
   [ TestLabel "UTF-8 message is decoded and trimmed" $ TestCase $
@@ -213,6 +220,7 @@ errorMessageTests = TestLabel "provider error message decoding" $ TestList $
     absent (label, bytes) = TestLabel label $ TestCase $
       assertEqual "unusable error body has no message" Nothing (decodeProviderErrorMessage bytes)
 
+-- | Accept complete structured options and reject malformed or partial responses.
 decoderTests :: Test
 decoderTests = TestLabel "prompt response decoder" $ TestList $
   [ TestLabel "real GPT-6.1 Sol structured response preserves all three options" $ TestCase $ do
@@ -264,14 +272,16 @@ decoderTests = TestLabel "prompt response decoder" $ TestList $
         Left err -> assertFailure ("unexpected error type: " <> show err)
         Right _ -> assertFailure "expected malformed or incomplete provider output to be rejected"
 
--- Helpers for synthetic edge cases; the real response uses a repository fixture.
+-- | Build a synthetic completion envelope; the real response uses a repository fixture.
 completion :: Text -> Value -> BL.ByteString
 completion finishReason message = encode $ object
   ["choices" .= [object ["finish_reason" .= finishReason, "message" .= message]]]
 
+-- | Wrap a text payload in a normal-stop synthetic completion.
 contentCompletion :: Text -> BL.ByteString
 contentCompletion content = completion "stop" (object ["content" .= content])
 
+-- | Read model, stream flag, and role/content pairs for request assertions.
 parseEnvelope :: Value -> Parser (Text, Bool, [(Text, Text)])
 parseEnvelope = withObject "chat request" $ \request -> do
   selectedModel <- request .: "model"

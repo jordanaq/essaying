@@ -70,6 +70,9 @@ type ContextApi =
         :<|> ReqBody '[JSON] ContextWriteRequest :> Put '[JSON] ContextLayer
         :<|> ReqBody '[JSON] DeleteContextRequest :> DeleteNoContent
 
+-- | Complete-response AI operations under the selected account's workspace.
+-- Request paths identify existing essay directories. Provider credentials and
+-- resolved context stay server-side; neither route persists its generated result.
 type AiApi =
        "prompt" :> ReqBody '[JSON] PromptRequest :> Post '[JSON] PromptResponse
   :<|> "grade" :> ReqBody '[JSON] GradeRequest :> Post '[JSON] GradeResponse

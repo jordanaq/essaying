@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Grade envelope/payload decoder tests using real and synthetic responses.
 module GradeProvider (tests) where
 
 import Data.Aeson (eitherDecode, encode, object, (.=))
@@ -15,6 +16,7 @@ import Essaying.Types.Ai
   )
 import Test.HUnit (Test (..), assertEqual, assertFailure)
 
+-- | Replay the real grade and reject invalid envelopes and inner assessment shapes.
 tests :: Test
 tests = TestLabel "grading provider decoding" $ TestList $
   [ TestLabel "recorded real response preserves every score and feedback string" $ TestCase $ do
@@ -50,6 +52,7 @@ tests = TestLabel "grading provider decoding" $ TestList $
            ]
        ]
 
+-- | Build a synthetic completion with explicit finish reason and text content.
 completion :: Text -> Text -> BL.ByteString
 completion finishReason content = encode $ object
   [ "choices" .= [object
@@ -58,6 +61,7 @@ completion finishReason content = encode $ object
       ]]
   ]
 
+-- | Encode one valid Unicode assessment with caller-supplied overall feedback.
 payload :: Text -> Text
 payload feedback = TL.toStrict $ TLE.decodeUtf8 $ encode $ object
   [ "feedback" .= feedback

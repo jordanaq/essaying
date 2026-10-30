@@ -1,7 +1,7 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- Run from backend/. Uses production loaders and the request-body builder.
+-- | Run from backend/. Uses production loaders and the request-body builder.
 -- Does not load provider credentials or make network requests.
 module Main where
 
@@ -17,6 +17,8 @@ import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath ((</>))
 
+-- | Resolve the saved sample inputs and write the production-built JSON request.
+-- This helper neither loads credentials nor sends the request.
 main :: IO ()
 main = do
   args <- getArgs

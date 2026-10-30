@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Full-app prompt and grading replays against local fake providers.
+-- Recorded request/response fixtures verify integration without live API calls.
 module AiEndpoints (tests) where
 
 import ApiClients (aiClients)
@@ -30,6 +32,7 @@ import System.Directory (copyFile, createDirectoryIfMissing, listDirectory)
 import System.FilePath ((</>), takeDirectory)
 import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
+-- | Verify both prompt model-selection paths and the recorded grading workflow.
 tests :: Test
 tests = TestLabel "AI endpoints through the real application" $ TestList
   [ promptEndpoint "essay context overrides the account model" (Just "context-model") "context-model"
@@ -37,6 +40,8 @@ tests = TestLabel "AI endpoints through the real application" $ TestList
   , gradeEndpoint
   ]
 
+-- | Replay the exact grading sample through routing, loading, transport, and normalization.
+-- Expected scores/weights are fixture data, not calculated by the helper under test.
 gradeEndpoint :: Test
 gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ TestCase $ withCache $ \cache -> do
   let fixtures = "test/fixtures/provider"
@@ -91,6 +96,7 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
         entries <- listDirectory (workspace </> "Religion")
         assertEqual "grading creates no files in the essay" ["essay.md", "prompt.md"] (sort entries)
 
+-- | Assert selected-account context/model inputs and unchanged saved files on generation.
 promptEndpoint :: String -> Maybe Text -> Text -> Test
 promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ withCache $ \cache -> do
   recorded <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-prompt-options.response.json"
@@ -168,6 +174,7 @@ promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ w
   where
     scalar value = object ["tag" .= ("SetScalar" :: Text), "contents" .= value]
 
+-- | Extract outgoing model, response schema, and messages for endpoint assertions.
 providerInput :: Value -> Parser (Text, Bool, Value, [(Text, Text)])
 providerInput = withObject "provider request" $ \request -> do
   selectedModel <- request .: "model"

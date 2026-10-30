@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Grading preflight and upstream-failure regressions against the real app.
+-- The actual 120-second deadline check is opt-in, outside the regular suite.
 module GradeFailures (tests, deadlineTests) where
 
 import AiTestSupport (readFixture, writeBytes, withCache, withEnvironment)
@@ -33,6 +35,8 @@ import System.FilePath ((</>), takeDirectory)
 import System.Timeout (timeout)
 import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
+-- | Fast endpoint failures plus the allowed missing-assignment case.
+-- Rejected inputs must not contact the provider; upstream failures stay redacted.
 tests :: Test
 tests = TestLabel "grading endpoint rejection and upstream failures" $ TestList $
   [ rejected "empty draft" (\_ root -> writeBytes (root </> "Religion/essay.md") "") "Religion" 422
@@ -103,6 +107,7 @@ tests = TestLabel "grading endpoint rejection and upstream failures" $ TestList 
          ]
      ]
 
+-- | Alter a sample workspace and require a public error with zero provider requests.
 rejected :: String -> (FilePath -> FilePath -> IO ()) -> FilePath -> Int -> Test
 rejected label prepare essayPath expectedStatus = TestLabel label $ TestCase $
   withScenario status200 "provider must not be called" [] prepare $ \_ requests -> do
@@ -110,6 +115,7 @@ rejected label prepare essayPath expectedStatus = TestLabel label $ TestCase $
     assertPublicError expectedStatus response
     assertEqual "rejected input never reaches the provider" 0 =<< readIORef requests
 
+-- | Override fake connection settings and assert corrective, private-data-free output.
 configurationFailure :: String -> [(String, Maybe String)] -> BS.ByteString -> Test
 configurationFailure label overrides expectedGuidance = TestLabel label $ TestCase $
   withScenario status200 "provider must not be called" overrides (\_ _ -> pure ()) $ \_ requests -> do
@@ -119,12 +125,14 @@ configurationFailure label overrides expectedGuidance = TestLabel label $ TestCa
       (expectedGuidance `BS.isInfixOf` BL.toStrict (simpleBody response))
     assertEqual "invalid configuration never reaches the provider" 0 =<< readIORef requests
 
+-- | POST through the actual Servant application without starting an app HTTP server.
 callGrade :: FilePath -> IO SResponse
 callGrade path = runSession (srequest (SRequest request (encode (GradeRequest path)))) app
   where
     request = (setPath Wai.defaultRequest "/api/v1/accounts/grade-tests/workspace/ai/grade")
       { Wai.requestMethod = "POST", Wai.requestHeaders = [("Content-Type", "application/json")] }
 
+-- | Check the status and absence of deliberately private test sentinels and paths.
 assertPublicError :: Int -> SResponse -> IO ()
 assertPublicError expected response = do
   assertEqual "HTTP error status" expected (statusCode (simpleStatus response))
@@ -132,6 +140,8 @@ assertPublicError expected response = do
     assertBool "public error does not expose provider diagnostics, credentials, or rejected paths"
       (not (private `BS.isInfixOf` BL.toStrict (simpleBody response)))
 
+-- | Serve a controlled upstream response using an isolated sample workspace.
+-- Restore temporary environment settings and stop the provider after the check.
 withScenario
   :: Status -> BL.ByteString -> [(String, Maybe String)]
   -> (FilePath -> FilePath -> IO ())
@@ -147,6 +157,7 @@ withScenario status bytes overrides prepare check = withSampleWorkspace $ \cache
     withEnvironment (providerSettings cache port) $
       withEnvironment overrides (check root requests)
 
+-- | Copy the frozen sample into a temporary account, never a user workspace.
 withSampleWorkspace :: (FilePath -> FilePath -> IO a) -> IO a
 withSampleWorkspace check = withCache $ \cache -> do
   let account = accountRoot (usersRoot (CacheRoot cache)) (AccountId "grade-tests")
@@ -157,9 +168,11 @@ withSampleWorkspace check = withCache $ \cache -> do
     copyFile ("test/fixtures/provider/grade-workspace" </> relative) (root </> relative)
   check cache root
 
+-- | Locate the temporary test account profile for controlled fixture changes.
 profilePath :: FilePath -> FilePath
 profilePath cache = profileRoot (accountRoot (usersRoot (CacheRoot cache)) (AccountId "grade-tests"))
 
+-- | Modify a sample layer as raw JSON so tests can exercise invalid stored input.
 changeContext :: FilePath -> (KeyMap.KeyMap Value -> KeyMap.KeyMap Value) -> IO ()
 changeContext root change = do
   value <- readFixture (root </> "context.json")
@@ -167,10 +180,12 @@ changeContext root change = do
     Object fields -> writeBytes (root </> "context.json") (encode (Object (change fields)))
     _ -> assertFailure "sample context must be an object"
 
+-- | Replace only the sample context layer's rubric operation.
 setRubric :: FilePath -> Value -> IO ()
 setRubric root criteria = changeContext root $ KeyMap.insert "rubric" $
   object ["tag" .= ("ReplaceRubric" :: Text), "contents" .= criteria]
 
+-- | Use a loopback URL and fake key, disabling proxies for deterministic local tests.
 providerSettings :: FilePath -> Int -> [(String, Maybe String)]
 providerSettings cache port =
   [ ("HESSAY_CACHE", Just cache)
@@ -178,28 +193,33 @@ providerSettings cache port =
   , ("OPENAI_API_KEY", Just "test-key")
   ] <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]
 
+-- | Synthetic private diagnostic used to prove that upstream messages are redacted.
 upstreamError :: BL.ByteString
 upstreamError = encode $ object ["error" .= object ["message" .= ("PRIVATE_UPSTREAM_DIAGNOSTIC test-key" :: Text)]]
 
+-- | Criterion keys required by the frozen grading sample.
 criterionNames :: [Key]
 criterionNames = ["argument", "comparison", "evidence", "interpretation"]
 
+-- | Build synthetic grade JSON, allowing invalid scores or feedback deliberately.
 assessment :: [Key] -> Int -> Text -> Value
 assessment names score feedback = object
   [ "feedback" .= feedback
   , "criteria" .= object [name .= object ["score" .= score, "feedback" .= feedback] | name <- names]
   ]
 
+-- | A well-shaped assessment for testing abnormal completion reasons.
 validAssessment :: Value
 validAssessment = assessment criterionNames 80 "Feedback"
 
+-- | Place serialized grading JSON inside the shared Chat Completions envelope.
 completion :: Text -> Value -> BL.ByteString
 completion finish payload = encode $ object ["choices" .= [object
   [ "finish_reason" .= finish
   , "message" .= object ["content" .= TL.toStrict (TLE.decodeUtf8 (encode payload))]
   ]]]
 
--- Deliberately separate from the fast suite: exercises the real 120-second
+-- | Deliberately separate from the fast suite: exercises the real 120-second
 -- production deadline. Heartbeats prevent the 60-second idle timeout winning.
 deadlineTests :: Test
 deadlineTests = TestLabel "real grading deadline cancels an active provider response" $ TestCase $

@@ -1,3 +1,5 @@
+-- | Temporary fixtures and reversible process settings shared by AI tests.
+-- Environment-mutating tests must run serially within a test process.
 module AiTestSupport (readFixture, writeBytes, withCache, withEnvironment) where
 
 import Control.Exception (bracket)
@@ -10,6 +12,7 @@ import System.FilePath ((</>), takeDirectory)
 import System.IO (hClose, openTempFile)
 import Test.HUnit (assertFailure)
 
+-- | Decode a repository JSON fixture, failing the test on malformed fixture data.
 readFixture :: FromJSON a => FilePath -> IO a
 readFixture path = do
   bytes <- BL.readFile path
@@ -17,11 +20,13 @@ readFixture path = do
     Left err -> assertFailure ("invalid test fixture: " <> err) >> fail "invalid fixture"
     Right value -> pure value
 
+-- | Create fixture parent directories and write the requested bytes.
 writeBytes :: FilePath -> BL.ByteString -> IO ()
 writeBytes path bytes = do
   createDirectoryIfMissing True (takeDirectory path)
   BL.writeFile path bytes
 
+-- | Allocate a temporary directory and remove it after the test, including on failure.
 withCache :: (FilePath -> IO a) -> IO a
 withCache = bracket acquire removePathForcibly
   where
@@ -35,6 +40,7 @@ withCache = bracket acquire removePathForcibly
 
 -- Tests run serially. Restore process settings even if an assertion fails;
 -- credentials are never logged, and requests use only the literal fake key.
+-- | Apply process settings for a serial test and restore them after its action.
 withEnvironment :: [(String, Maybe String)] -> IO a -> IO a
 withEnvironment settings action = bracket acquire restore (const action)
   where

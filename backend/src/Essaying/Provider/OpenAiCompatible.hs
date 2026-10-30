@@ -1,6 +1,9 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Non-streaming prompting and grading over the Chat Completions wire format.
+-- Pure builders describe the payloads; workers handle HTTP and decoding. The
+-- caller supplies resolved context, while provider credentials stay server-side.
 module Essaying.Provider.OpenAiCompatible
   ( generateGrade
   , generatePrompts
@@ -50,11 +53,16 @@ import System.Timeout (timeout)
 
 -- Configuration and constants
 
+-- | Backend connection settings. Deliberately has no 'Show' instance, since the
+-- key is private. Required endpoints and structured-output support depend on
+-- the configured provider and selected model.
 data OpenAiProviderConfig = OpenAiProviderConfig
-  { baseUrl :: Text
-  , apiKey :: Text
+  { baseUrl :: Text -- ^ API base URL, including any version prefix such as @/v1@.
+  , apiKey :: Text -- ^ Provider credential sent as a Bearer token; never log it.
   }
 
+-- | System instructions for assignment candidates, separate from user context.
+-- Defaults to one option unless extra instructions explicitly request a count.
 promptGenerationTask :: Text
 promptGenerationTask = Text.unlines
   [ "Create self-contained essay assignment options for the writer to choose from."
@@ -81,6 +89,9 @@ promptGenerationTask = Text.unlines
   , "Do not wrap the JSON in a Markdown code fence or include a preamble, explanations of your choices, or additional fields."
   ]
 
+-- | System instructions for rubric assessments on a 0-100 scale.
+-- The model supplies feedback and criterion scores; the application owns weights
+-- and the overall score. Draft contents must not override grading instructions.
 gradingTask :: Text
 gradingTask = Text.unlines
   [ "Assess the supplied essay draft against the supplied assignment and rubric."
@@ -115,6 +126,8 @@ gradingTask = Text.unlines
   , "The application calculates normalized weights and the overall score."
   ]
 
+-- | Strict response-format envelope requiring a nonempty array of prompt strings.
+-- Option count is requested in instructions rather than fixed by this schema.
 promptResponseFormat :: Value
 promptResponseFormat =
   object
@@ -138,6 +151,8 @@ promptResponseFormat =
         ]
     ]
 
+-- | Reusable schema for one provider assessment. Score bounds and nonblank
+-- feedback are checked by the handler after decoding, not by this schema.
 criterionGradeSchema :: Value
 criterionGradeSchema =
     object
@@ -152,6 +167,8 @@ criterionGradeSchema =
 
 -- Shared provider functions
 
+-- | Read trimmed, nonblank @OPENAI_BASE_URL@ and @OPENAI_API_KEY@ settings.
+-- Reject multiline keys locally. URL parsing happens during request construction.
 loadProviderConfig :: IO (Either ProviderError OpenAiProviderConfig)
 loadProviderConfig = do
   rawUrl <- lookupEnvClean "OPENAI_BASE_URL"
@@ -166,6 +183,9 @@ loadProviderConfig = do
           pure $ Left $ ProviderConfigurationInvalid "OPENAI_API_KEY"
       | otherwise -> pure $ Right $ OpenAiProviderConfig url key
 
+-- | Build an authenticated JSON POST to @baseUrl/chat/completions@.
+-- Preserves the API prefix, removes trailing base-URL slashes, and disables
+-- redirects. Invalid URLs can throw 'HttpException', handled by the workers.
 buildRequest :: OpenAiProviderConfig -> Value -> IO Request
 buildRequest (OpenAiProviderConfig url apiKey) body = do
   let endpoint =
@@ -180,16 +200,21 @@ buildRequest (OpenAiProviderConfig url apiKey) body = do
       , requestHeaders =
           [ ("Content-Type", "application/json")
           ]
-      , responseTimeout = responseTimeoutMicro (60 * 1000000) -- 60 seconds timeout for the request
+      , responseTimeout = responseTimeoutMicro (60 * 1000000) -- Response timeout; wrappers also bound the worker operation.
       , redirectCount = 0
       }
     )
 
+-- | Send one request and classify transport failures without retaining exceptions
+-- that may contain credentials. Return non-2xx responses for explicit decoding;
+-- they must not become transport exceptions or be mistaken for successful output.
 sendRequest
   :: Manager
   -> Request
   -> IO (Either ProviderError (Response BL.ByteString))
 sendRequest manager request = do
+  -- Catch only HTTP exceptions: the outer deadline's asynchronous exception
+  -- must reach System.Timeout rather than becoming a connection failure.
   result <- try (httpLbs (setRequestIgnoreStatus request) manager) :: IO (Either HttpException (Response BL.ByteString))
 
   pure $ case result of
@@ -207,6 +232,8 @@ sendRequest manager request = do
     Left _ -> Left ProviderConnectionFailed
     Right response -> Right response
 
+-- | Extract the first choice's assistant content from the shared response envelope.
+-- Prompt and grade payloads use the same envelope but different inner JSON.
 parseResponseContent :: Value -> Parser Text
 parseResponseContent = withObject "chat completion" $ \response -> do
   choices <- response .: "choices"
@@ -214,6 +241,9 @@ parseResponseContent = withObject "chat completion" $ \response -> do
     [] -> fail "Provider returned no choices"
     (choice:_) -> parseChoice choice
 
+-- | Require a normal @stop@ completion and trimmed, nonblank text content.
+-- Truncated, filtered, tool-call, and null-content responses cannot be used as
+-- complete structured results, even if a fragment happens to parse as JSON.
 parseChoice :: Value -> Parser Text
 parseChoice = withObject "completion choice" $ \choice -> do
   finishReason <- choice .: "finish_reason" :: Parser Text
@@ -229,6 +259,9 @@ parseChoice = withObject "completion choice" $ \choice -> do
       then fail "Provider returned an empty assignment"
       else pure assignment) message
 
+-- | Best-effort extraction of private upstream diagnostics. Unexpected JSON,
+-- non-JSON bodies, or missing messages produce 'Nothing'; status codes survive.
+-- Public handlers must not echo the extracted text.
 decodeProviderErrorMessage
   :: BL.ByteString
   -> Maybe Text
@@ -236,6 +269,7 @@ decodeProviderErrorMessage bytes = do
   payload <- decode bytes
   parseMaybe parseProviderErrorMessage payload
 
+-- | Parse and trim @error.message@, rejecting an empty or wrongly shaped value.
 parseProviderErrorMessage :: Value -> Parser Text
 parseProviderErrorMessage =
   withObject "provider error response" $ \payload -> do
@@ -248,6 +282,8 @@ parseProviderErrorMessage =
 
 -- Prompt generation
 
+-- | Load connection settings, create a TLS-capable manager, and run the prompt
+-- worker inside a 120-second IO deadline. Does not save any generated option.
 generatePrompts
   :: Text -- Selected model
   -> EffectiveContext -- Effective context
@@ -263,6 +299,9 @@ generatePrompts model context instructions = runExceptT $ do
     Nothing -> throwE ProviderTimedOut
     Just res -> ExceptT $ pure res
 
+-- | Execute prompt generation with an explicit manager and configuration.
+-- This worker has no outer operation deadline of its own; 'generatePrompts'
+-- supplies it. Explicit dependencies also allow local fake-provider tests.
 generatePromptsWith
   :: Manager
   -> OpenAiProviderConfig
@@ -283,6 +322,8 @@ generatePromptsWith manager config model context instructions = runExceptT $ do
   response <- ExceptT $ sendRequest manager request
   either throwE pure $ decodePromptHttpResponse response
 
+-- | Build the complete non-streaming prompt request, including system task,
+-- serialized context/instructions, model, and strict response schema.
 buildPromptRequestBody :: Text -> EffectiveContext -> Maybe Text -> Value
 buildPromptRequestBody model context instructions =
   object
@@ -301,6 +342,8 @@ buildPromptRequestBody model context instructions =
         ]
     ]
 
+-- | Keep backend-resolved context and request-specific generation instructions
+-- distinct. Prompt generation does not include an essay draft or saved prompt.
 buildPromptInput :: EffectiveContext -> Maybe Text -> Value
 buildPromptInput context instructions =
   object
@@ -308,6 +351,8 @@ buildPromptInput context instructions =
     , "instructions" .= instructions
     ]
 
+-- | Decode only successful HTTP responses as prompt output. Preserve upstream
+-- status and optional private diagnostic text for safe handler classification.
 decodePromptHttpResponse
   :: Response BL.ByteString
   -> Either ProviderError [Text]
@@ -318,6 +363,8 @@ decodePromptHttpResponse response
     code = statusCode $ responseStatus response
     msg_m = decodeProviderErrorMessage (responseBody response)
 
+-- | Decode the provider envelope, then JSON inside @message.content@, and validate
+-- the resulting options. Parser details are replaced with a fixed error category.
 decodePromptResponse
   :: BL.ByteString
   -> Either ProviderError [Text]
@@ -328,6 +375,8 @@ decodePromptResponse bytes =
     payload <- eitherDecodeStrict' (TextEncoding.encodeUtf8 content)
     parseEither parsePromptOptions payload
 
+-- | Require a nonempty list of nonblank prompts. Trim each option while keeping
+-- its internal Markdown and original position; one bad option rejects the result.
 parsePromptOptions :: Value -> Parser [Text]
 parsePromptOptions = withObject "prompt options" $ \payload -> do
   options <- payload .: "prompts" :: Parser [Text]
@@ -342,6 +391,8 @@ parsePromptOptions = withObject "prompt options" $ \payload -> do
 
 -- Grading
 
+-- | Run grading with backend settings, a TLS-capable manager, and a 120-second
+-- worker deadline. Returns raw assessments for handler validation/normalization.
 generateGrade :: Text -> EffectiveContext -> WorkspaceEssayContent -> IO (Either ProviderError ProviderGrade)
 generateGrade model context essay = runExceptT $ do
   config <- ExceptT loadProviderConfig
@@ -352,6 +403,9 @@ generateGrade model context essay = runExceptT $ do
     Nothing -> throwE ProviderTimedOut
     Just r -> ExceptT $ pure r
 
+-- | Execute a grading request with explicit connection dependencies.
+-- The caller owns context/draft preflight and any outer deadline; this worker
+-- constructs, sends, and decodes a single request without saving its result.
 generateGradeWith
   :: Manager
   -> OpenAiProviderConfig
@@ -372,6 +426,8 @@ generateGradeWith manager config model context essay = runExceptT $ do
   response <- ExceptT $ sendRequest manager request
   either throwE pure $ decodeGradeHttpResponse response
 
+-- | Build the non-streaming grading request. The response schema requires exactly
+-- the criterion names in the supplied effective rubric.
 buildGradeRequestBody
   :: Text -> EffectiveContext -> WorkspaceEssayContent -> Value
 buildGradeRequestBody model context essay =
@@ -391,6 +447,8 @@ buildGradeRequestBody model context essay =
         ]
     ]
 
+-- | Package resolved context, saved assignment, and saved draft as separate inputs.
+-- Excludes storage paths and explorer metadata; a missing assignment is empty text.
 buildGradeInput :: EffectiveContext -> WorkspaceEssayContent -> Value
 buildGradeInput context WorkspaceEssayContent{prompt = assignment, markdown = draft}= object
   [ "context" .= context
@@ -398,6 +456,8 @@ buildGradeInput context WorkspaceEssayContent{prompt = assignment, markdown = dr
   , "draft" .= draft
   ]
 
+-- | Build a strict 'ProviderGrade'-shaped response format for this rubric's names.
+-- Generic JSON instances cannot derive these runtime keys from the type alone.
 gradeResponseFormat :: [Text] -> Value
 gradeResponseFormat criteriaNames =
   object
@@ -425,6 +485,8 @@ gradeResponseFormat criteriaNames =
         ]
     ]
 
+-- | Decode a 2xx response as a grade; retain other statuses and private messages
+-- for the shared handler mapping instead of interpreting their bodies as grades.
 decodeGradeHttpResponse
   :: Response BL.ByteString
   -> Either ProviderError ProviderGrade
@@ -435,6 +497,9 @@ decodeGradeHttpResponse response
     code = statusCode $ responseStatus response
     msg_m = decodeProviderErrorMessage (responseBody response)
 
+-- | Decode both JSON layers into an unweighted provider assessment.
+-- This validates the decodable shape; the handler checks names, score ranges,
+-- feedback, and rubric weights before constructing the public response.
 decodeGradeResponse
   :: BL.ByteString
   -> Either ProviderError ProviderGrade

@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Pure grading validation and independently expected weighted-score tests.
 module GradeNormalization (tests) where
 
 import Data.Map.Strict (Map)
@@ -13,6 +14,7 @@ import Essaying.Types.Ai
 import Essaying.Types.Context (RubricCriterion (..))
 import Test.HUnit (Assertion, Test (..), assertBool, assertEqual, assertFailure)
 
+-- | Check weighted means, retained zero-weight criteria, and every rejection guard.
 tests :: Test
 tests = TestLabel "grade validation and normalization" $ TestList $
   [ TestLabel "relative weights produce a weighted average and preserve feedback" $ TestCase $
@@ -75,24 +77,30 @@ tests = TestLabel "grade validation and normalization" $ TestList $
      ]
   <> [ rejects "empty rubric and assessments" (GenerationFailed "Total weight of rubric criteria is invalid") (grade []) Map.empty ]
 
+-- | Two raw assessments with independently known scores and feedback.
 sampleGrade :: ProviderGrade
 sampleGrade = grade [("argument", 90, "Argument feedback"), ("evidence", 60, "Evidence feedback")]
 
+-- | Relative weights 2:1; the expected weighted score is 80.
 sampleRubric :: Map Text RubricCriterion
 sampleRubric = rubric [("argument", 2), ("evidence", 1)]
 
+-- | Construct provider assessments without precomputing application-owned weights.
 grade :: [(Text, Double, Text)] -> ProviderGrade
 grade entries = ProviderGrade "Overall feedback" $
   Map.fromList [(name, ProviderCriterionGrade score feedback) | (name, score, feedback) <- entries]
 
+-- | Build test rubric entries from relative weights without descriptions.
 rubric :: [(Text, Double)] -> Map Text RubricCriterion
 rubric entries = Map.fromList [(name, RubricCriterion weight Nothing) | (name, weight) <- entries]
 
+-- | Require a particular failure category for an invalid assessment or rubric.
 rejects :: String -> ProviderError -> ProviderGrade -> Map Text RubricCriterion -> Test
 rejects label expectedError provider expectedRubric = TestLabel label $ TestCase $
   assertEqual "rejects the invalid assessment with the expected reason"
     (Left expectedError) (normalizeGrade provider expectedRubric)
 
+-- | Compare complete feedback/criteria and allow small floating-point rounding error.
 assertGrade :: Double -> Text -> [(Text, CriterionGrade)] -> Either ProviderError GradeResponse -> Assertion
 assertGrade expectedOverall expectedFeedback expectedCriteria result = case result of
   Left err -> assertFailure ("expected a valid grade, got " <> show err)
@@ -108,6 +116,7 @@ assertGrade expectedOverall expectedFeedback expectedCriteria result = case resu
           assertEqual "criterion feedback" expectedText text
           assertClose "normalized weight" expectedWeight weight) expectedCriteria
 
+-- | Reject non-finite results and compare numeric values with an absolute tolerance.
 assertClose :: String -> Double -> Double -> Assertion
 assertClose label expected actual =
   assertBool (label <> ": expected " <> show expected <> ", got " <> show actual)

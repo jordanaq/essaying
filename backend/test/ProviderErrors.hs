@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Public provider-error status, guidance, and redaction contract tests.
 module ProviderErrors (tests) where
 
 import Data.ByteString.Char8 qualified as BS
@@ -9,6 +10,7 @@ import Essaying.Types.Ai (ProviderError (..))
 import Servant (ServerError (..))
 import Test.HUnit (Test (..), assertBool, assertEqual)
 
+-- | Assert safe public statuses and corrective messages for every error category.
 tests :: Test
 tests = TestLabel "safe provider error contract" $ TestList
   [ TestLabel label $ TestCase $ do
