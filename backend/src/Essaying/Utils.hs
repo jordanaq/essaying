@@ -1,25 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Utils
-  ( trimStr
-  , lookupEnvClean
-  , debug_
-  , toSlugChar
-  , slugifyText
-  , isValidAccountName
-  )
+module Essaying.Utils (
+  trimStr,
+  lookupEnvClean,
+  debug_,
+  toSlugChar,
+  slugifyText,
+  isValidAccountName,
+)
 where
 
 import Control.Monad (when)
-import System.Environment (lookupEnv)
 import Data.Char (isAlphaNum, isSpace, toLower)
 import Data.Text (Text)
-import qualified Data.Text as Text
-
+import Data.Text qualified as Text
+import System.Environment (lookupEnv)
 
 trimStr :: String -> String
 trimStr = f . f
-  where f = reverse . dropWhile isSpace
+ where
+  f = reverse . dropWhile isSpace
 
 debug_ :: String -> Int -> String -> IO ()
 debug_ pre level out = do
@@ -28,8 +28,9 @@ debug_ pre level out = do
     Just val -> when (read val >= level) $ putStrLn (pre <> " " <> out)
     Nothing -> return ()
 
--- | Trim an optional setting, treating missing or blank values as absent.
--- This only cleans text; callers still validate URLs, numbers, and other types.
+{- | Trim an optional setting, treating missing or blank values as absent.
+This only cleans text; callers still validate URLs, numbers, and other types.
+-}
 lookupEnvClean :: String -> IO (Maybe Text)
 lookupEnvClean key = do
   raw <- lookupEnv key
@@ -54,5 +55,5 @@ isValidAccountName :: Text -> Bool
 isValidAccountName name =
   let trimmed = trimStr $ Text.unpack name
    in not (null trimmed) && all isValidChar trimmed
-  where
-    isValidChar c = isAlphaNum c || c == '-' || c == '_'
+ where
+  isValidChar c = isAlphaNum c || c == '-' || c == '_'

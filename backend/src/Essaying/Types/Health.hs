@@ -2,10 +2,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 
-module Essaying.Types.Health
-  ( HealthResponse (..)
-  , ReadyResponse (..)
-  )
+module Essaying.Types.Health (
+  HealthResponse (..),
+  ReadyResponse (..),
+)
 where
 
 import Data.Aeson (FromJSON, ToJSON)

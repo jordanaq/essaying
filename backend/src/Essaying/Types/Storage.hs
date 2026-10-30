@@ -1,12 +1,12 @@
 {-# LANGUAGE DerivingStrategies #-}
 
-module Essaying.Types.Storage
-  ( CacheRoot (..)
-  , UsersRoot (..)
-  , AccountRoot (..)
-  , WorkspaceRoot (..)
-  , relativeUsersRoot
-  )
+module Essaying.Types.Storage (
+  CacheRoot (..),
+  UsersRoot (..),
+  AccountRoot (..),
+  WorkspaceRoot (..),
+  relativeUsersRoot,
+)
 where
 
 newtype CacheRoot = CacheRoot

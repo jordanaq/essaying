@@ -15,8 +15,9 @@ import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath ((</>))
 
--- | Resolve the saved sample inputs and write the production-built JSON request.
--- This helper neither loads credentials nor sends the request.
+{- | Resolve the saved sample inputs and write the production-built JSON request.
+This helper neither loads credentials nor sends the request.
+-}
 main :: IO ()
 main = do
   args <- getArgs
@@ -29,10 +30,11 @@ main = do
   case resolved of
     Left err -> die ("Context resolution failed: " <> show err)
     Right context -> case context of
-      EffectiveContext {model = Nothing} -> die "Sample context must select a model."
-      EffectiveContext {model = Just selectedModel} -> do
+      EffectiveContext{model = Nothing} -> die "Sample context must select a model."
+      EffectiveContext{model = Just selectedModel} -> do
         createDirectoryIfMissing True output
         BL.writeFile (output </> "effective-context.json") (encode context)
-        BL.writeFile (output </> "request.json")
+        BL.writeFile
+          (output </> "request.json")
           (encode (buildPromptRequestBody selectedModel context (Just instructions)))
         putStrLn ("Wrote effective-context.json and request.json to " <> output)

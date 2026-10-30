@@ -1,32 +1,32 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Handler.Account
-  ( accountHandler
-  )
+module Essaying.Handler.Account (
+  accountHandler,
+)
 where
 
-import Data.Text (Text)
-import Essaying.API.V1 (AccountApi, AccountsApi)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import Essaying.API.V1 (AccountApi, AccountsApi)
 import Essaying.Handler.Workspace (workspaceHandler)
-import Essaying.Utils (debug_, isValidAccountName, slugifyText)
-import Essaying.Persistence.Account
-  ( createAccountProfile
-  , deleteAccountProfile
-  , getAccountNames
-  , readAccountProfile
-  , saveAccountProfile
-  )
+import Essaying.Persistence.Account (
+  createAccountProfile,
+  deleteAccountProfile,
+  getAccountNames,
+  readAccountProfile,
+  saveAccountProfile,
+ )
 import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot)
-import Essaying.Types.Account
-  ( AccountId (..)
-  , AccountProfile (..)
-  , CreateAccountProfileResult (..)
-  , CreateAccountRequest (..)
-  , UpdateAccountRequest (..)
-  )
-import Servant (Server, Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
+import Essaying.Types.Account (
+  AccountId (..),
+  AccountProfile (..),
+  CreateAccountProfileResult (..),
+  CreateAccountRequest (..),
+  UpdateAccountRequest (..),
+ )
+import Essaying.Utils (debug_, isValidAccountName, slugifyText)
+import Servant (Handler, NoContent (NoContent), Server, err400, err404, err409, throwError, (:<|>) (..))
 
 accountHandler :: Server AccountsApi
 accountHandler =
@@ -113,4 +113,3 @@ updateAccountProfileHandler accountIdText req = do
 
 makeAccountId :: Text -> AccountId
 makeAccountId = AccountId . slugifyText
-

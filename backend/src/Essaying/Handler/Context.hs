@@ -1,28 +1,42 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Handler.Context
-  ( contextHandler
-  , loadContextHandler
-  , effectiveContextHandler
-  , createContextHandler
-  , updateContextHandler
-  , deleteContextHandler
-  )
+module Essaying.Handler.Context (
+  contextHandler,
+  loadContextHandler,
+  effectiveContextHandler,
+  createContextHandler,
+  updateContextHandler,
+  deleteContextHandler,
+)
 where
 
-import Essaying.API.V1 (ContextApi)
 import Control.Monad.IO.Class (liftIO)
+import Essaying.API.V1 (ContextApi)
 import Essaying.Handler.ContextError (contextError, contextValidationError)
-import Essaying.Persistence.Context (saveContextLayer, deleteContextLayer, loadContextLayer, loadEffectiveContext)
-import Essaying.Types.Context
-  ( ContextWriteRequest (..), parseContextLayer, ContextLayer, EffectiveContext, ContextLayerError (..), EffectiveContextError (..)
-  , CreateContextRequest (..), UpdateContextRequest (..), DeleteContextRequest (..)
-  )
+import Essaying.Persistence.Context (deleteContextLayer, loadContextLayer, loadEffectiveContext, saveContextLayer)
+import Essaying.Types.Context (
+  ContextLayer,
+  ContextLayerError (..),
+  ContextWriteRequest (..),
+  CreateContextRequest (..),
+  DeleteContextRequest (..),
+  EffectiveContext,
+  EffectiveContextError (..),
+  UpdateContextRequest (..),
+  parseContextLayer,
+ )
 import Essaying.Types.Storage (WorkspaceRoot)
-import Servant
-  ( Handler, Server, (:<|>) (..), NoContent (NoContent)
-  , err400, err403, err404, err409, err500
-  )
+import Servant (
+  Handler,
+  NoContent (NoContent),
+  Server,
+  err400,
+  err403,
+  err404,
+  err409,
+  err500,
+  (:<|>) (..),
+ )
 
 -- | Resolve the trusted workspace root for each request.
 contextHandler :: Handler WorkspaceRoot -> Server ContextApi
@@ -32,9 +46,9 @@ contextHandler resolveRoot =
     :<|> (\req -> withRoot (\root -> createRequest root req))
     :<|> (\req -> withRoot (\root -> updateRequest root req))
     :<|> (\req -> withRoot (\root -> deleteContextHandler root req))
-  where
-    withRoot :: (WorkspaceRoot -> Handler a) -> Handler a
-    withRoot action = resolveRoot >>= action
+ where
+  withRoot :: (WorkspaceRoot -> Handler a) -> Handler a
+  withRoot action = resolveRoot >>= action
 
 loadContextHandler :: WorkspaceRoot -> FilePath -> Handler ContextLayer
 loadContextHandler root path = do

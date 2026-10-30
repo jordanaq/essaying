@@ -1,8 +1,9 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Run from backend/. Uses production loaders and the request-body builder.
--- Does not load provider credentials or make network requests.
+{- | Run from backend/. Uses production loaders and the request-body builder.
+Does not load provider credentials or make network requests.
+-}
 module Main where
 
 import Data.Aeson (encode)
@@ -17,8 +18,9 @@ import System.Environment (getArgs)
 import System.Exit (die)
 import System.FilePath ((</>))
 
--- | Resolve the saved sample inputs and write the production-built JSON request.
--- This helper neither loads credentials nor sends the request.
+{- | Resolve the saved sample inputs and write the production-built JSON request.
+This helper neither loads credentials nor sends the request.
+-}
 main :: IO ()
 main = do
   args <- getArgs
@@ -36,6 +38,7 @@ main = do
       createDirectoryIfMissing True output
       BL.writeFile (output </> "effective-context.json") (encode context)
       BL.writeFile (output </> "saved-essay.json") (encode essay)
-      BL.writeFile (output </> "request.json")
+      BL.writeFile
+        (output </> "request.json")
         (encode (buildGradeRequestBody selectedModel context essay))
       putStrLn ("Wrote effective-context.json, saved-essay.json, and request.json to " <> output)

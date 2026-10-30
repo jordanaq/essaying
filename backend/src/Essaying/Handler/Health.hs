@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Handler.Health
-  ( healthResponse
-  , healthHandler
-  , readyResponseFromContext
-  , readyHandler
-  )
+module Essaying.Handler.Health (
+  healthResponse,
+  healthHandler,
+  readyResponseFromContext,
+  readyHandler,
+)
 where
 
 import Essaying.Context (emptyEffectiveContext)
@@ -14,7 +14,7 @@ import Essaying.Types.Health (HealthResponse (..), ReadyResponse (..))
 import Servant (Handler)
 
 healthResponse :: HealthResponse
-healthResponse = HealthResponse {status = "ok"}
+healthResponse = HealthResponse{status = "ok"}
 
 healthHandler :: Handler HealthResponse
 healthHandler = pure healthResponse

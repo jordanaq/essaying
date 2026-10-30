@@ -3,13 +3,13 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
-module Essaying.Types.Account
-  ( AccountId (..)
-  , AccountProfile (..)
-  , CreateAccountRequest (..)
-  , UpdateAccountRequest (..)
-  , CreateAccountProfileResult (..)
-  )
+module Essaying.Types.Account (
+  AccountId (..),
+  AccountProfile (..),
+  CreateAccountRequest (..),
+  UpdateAccountRequest (..),
+  CreateAccountProfileResult (..),
+)
 where
 
 import Data.Aeson (FromJSON, ToJSON)

@@ -1,7 +1,7 @@
-module Essaying.Persistence.Utils
-  ( PathCheckError (..)
-  , checkPathEntries
-  ) where
+module Essaying.Persistence.Utils (
+  PathCheckError (..),
+  checkPathEntries,
+) where
 
 import Control.Exception (IOException, try)
 import System.Directory (pathIsSymbolicLink)
@@ -15,10 +15,11 @@ data PathCheckError
   | PathIoError FilePath IOException
   deriving (Show)
 
--- | Inspect ordered path prefixes, stopping before following a symbolic link.
--- Missing final entries return False; missing parents and other IO failures are
--- errors. The caller supplies validated prefixes including its root and target.
--- This checks links, not file types, and is not atomic with later filesystem IO.
+{- | Inspect ordered path prefixes, stopping before following a symbolic link.
+Missing final entries return False; missing parents and other IO failures are
+errors. The caller supplies validated prefixes including its root and target.
+This checks links, not file types, and is not atomic with later filesystem IO.
+-}
 checkPathEntries :: FilePath -> [FilePath] -> IO (Either PathCheckError Bool)
 checkPathEntries _ [] = pure (Right True)
 checkPathEntries root (fullPath : remaining) = do

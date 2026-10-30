@@ -1,153 +1,170 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
-import ApiClients
-  ( healthClient, readyClient, listAccountsClient, createAccountClient
-  , accountByIdClient, workspaceClients, essayClients, contextClients
-  )
 import AiEndpoints qualified
-import GradeNormalization qualified
-import GradeProvider qualified
-import GradeFailures qualified
+import ApiClients (
+  accountByIdClient,
+  contextClients,
+  createAccountClient,
+  essayClients,
+  healthClient,
+  listAccountsClient,
+  readyClient,
+  workspaceClients,
+ )
 import ContextErrors qualified
 import ContextHandlers qualified
-import ProviderRequests qualified
+import GradeFailures qualified
+import GradeNormalization qualified
+import GradeProvider qualified
 import ProviderErrors qualified
+import ProviderRequests qualified
 import WorkspaceDiscovery qualified
 
 import ContextAcceptance qualified
 import Control.Exception (finally)
 import Control.Monad (when)
 import Data.Aeson (decode, encode, toJSON)
+import Data.ByteString.Lazy qualified as BL
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
 import Essaying.Context (applyLayer, emptyEffectiveContext)
 import Essaying.Handler.Health (healthResponse, readyResponseFromContext)
 import Essaying.Persistence.Account (createAccountProfile, readAccountProfile)
-import Essaying.Persistence.Context
-  ( loadContextLayer
-  , loadEffectiveContext
-  )
-import Essaying.Persistence.Workspace
-  ( createWorkspaceDirectory
-  , createWorkspaceEssay
-  , deleteWorkspaceDirectory
-  , deleteWorkspaceEssay
-  , isSafeSegment
-  , listWorkspaceTree
-  , loadWorkspaceEssay
-  , safeResolvePath
-  , saveWorkspaceEssay
-  )
+import Essaying.Persistence.Context (
+  loadContextLayer,
+  loadEffectiveContext,
+ )
+import Essaying.Persistence.Workspace (
+  createWorkspaceDirectory,
+  createWorkspaceEssay,
+  deleteWorkspaceDirectory,
+  deleteWorkspaceEssay,
+  isSafeSegment,
+  listWorkspaceTree,
+  loadWorkspaceEssay,
+  safeResolvePath,
+  saveWorkspaceEssay,
+ )
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..), CreateAccountRequest (..))
-import Essaying.Types.Context
-  ( ContextWriteRequest (..), DeleteContextRequest (..)
-  , ContextLayerError (..)
-  , EffectiveContext (..)
-  , EffectiveContextError (..)
-  , ListOverride (..)
-  , RubricCriterion (..)
-  , RubricOverride (..)
-  , ScalarOverride (..)
-  )
+import Essaying.Types.Context (
+  ContextLayerError (..),
+  ContextWriteRequest (..),
+  DeleteContextRequest (..),
+  EffectiveContext (..),
+  EffectiveContextError (..),
+  ListOverride (..),
+  RubricCriterion (..),
+  RubricOverride (..),
+  ScalarOverride (..),
+ )
 import Essaying.Types.Context qualified as ContextType (ContextLayer (..))
 import Essaying.Types.Health (HealthResponse (..), ReadyResponse (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
-import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayResult (..)
-  , WorkspaceEssayContent (..)
-  , WorkspaceNode (..)
-  , WorkspaceNodeType (..)
-  , SaveWorkspaceEssayRequest (SaveWorkspaceEssayRequest)
-  , WorkspacePathError (..)
-  , WorkspaceDeleteResult (..)
-  )
+import Essaying.Types.Workspace (
+  CreateWorkspaceDirectoryResult (..),
+  CreateWorkspaceEssayResult (..),
+  SaveWorkspaceEssayRequest (SaveWorkspaceEssayRequest),
+  WorkspaceDeleteResult (..),
+  WorkspaceEssayContent (..),
+  WorkspaceNode (..),
+  WorkspaceNodeType (..),
+  WorkspacePathError (..),
+ )
 import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
-import Servant.Client
-  ( BaseUrl (..)
-  , Scheme (Http)
-  , mkClientEnv
-  , runClientM
-  )
-import Servant (NoContent (NoContent), (:<|>) ((:<|>)) )
+import Servant (NoContent (NoContent), (:<|>) ((:<|>)))
+import Servant.Client (
+  BaseUrl (..),
+  Scheme (Http),
+  mkClientEnv,
+  runClientM,
+ )
 import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, doesDirectoryExist, getCurrentDirectory, removeFile, removePathForcibly)
 import System.Environment (getArgs, lookupEnv, setEnv, unsetEnv)
 import System.Exit (exitFailure)
-import System.FilePath ((</>), normalise, takeDirectory)
+import System.FilePath (normalise, takeDirectory, (</>))
 import Test.HUnit (Counts (..), Test (..), assertEqual, assertFailure, runTestTT)
-import qualified Data.ByteString.Lazy as BL
 
 main :: IO ()
 main = do
   args <- getArgs
-  counts <- runTestTT (case args of
-    ["--workspace"] -> workspaceTests
-    ["--provider"] -> TestList [ProviderRequests.tests, ProviderErrors.tests]
-    ["--ai"] -> AiEndpoints.tests
-    ["--grade"] -> TestList [GradeNormalization.tests, GradeProvider.tests, GradeFailures.tests]
-    ["--grade-failures"] -> GradeFailures.tests
-    ["--grade-deadline"] -> GradeFailures.deadlineTests
-    _ -> tests)
+  counts <-
+    runTestTT
+      ( case args of
+          ["--workspace"] -> workspaceTests
+          ["--provider"] -> TestList [ProviderRequests.tests, ProviderErrors.tests]
+          ["--ai"] -> AiEndpoints.tests
+          ["--grade"] -> TestList [GradeNormalization.tests, GradeProvider.tests, GradeFailures.tests]
+          ["--grade-failures"] -> GradeFailures.tests
+          ["--grade-deadline"] -> GradeFailures.deadlineTests
+          _ -> tests
+      )
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
 tests :: Test
-tests = TestList
-  [ ProviderRequests.tests
-  , ProviderErrors.tests
-  , AiEndpoints.tests
-  , GradeNormalization.tests
-  , GradeProvider.tests
-  , GradeFailures.tests
-  , ContextErrors.tests
-  , ContextHandlers.tests
-  , TestLabel "context acceptance" ContextAcceptance.tests
-  , TestLabel "health response value" healthResponseValue
-  , TestLabel "health response json" healthResponseJson
-  , TestLabel "ready response value" readyResponseValue
-  , TestLabel "ready response json" readyResponseJson
-  , TestLabel "context layer merge rules" contextLayerMergeRules
-  , TestLabel "context layer JSON representation" contextLayerJson
-  , TestLabel "context layer rejects blank strings" contextLayerRejectsBlankStrings
-  , TestLabel "context layer rejects invalid operation shapes" contextLayerRejectsInvalidOperationShapes
-  , TestLabel "context layer validates rubric criteria" contextLayerValidatesRubricCriteria
-  , TestLabel "load one context layer" loadOneContextLayer
-  , TestLabel "validate essay path for context" validateEssayPathForContext
-  , TestLabel "resolve inherited context files" resolveInheritedContextFiles
-  , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
-  , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
-  , TestLabel "context API mutations" contextApiMutations
-  , TestLabel "health endpoint" healthEndpoint
-  , TestLabel "ready endpoint" readyEndpoint
-  , TestLabel "list accounts endpoint with sample cache" listAccountsEndpointWithSampleCache
-  , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
-  , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
-  , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
-  , workspaceTests
-  ]
+tests =
+  TestList
+    [ ProviderRequests.tests
+    , ProviderErrors.tests
+    , AiEndpoints.tests
+    , GradeNormalization.tests
+    , GradeProvider.tests
+    , GradeFailures.tests
+    , ContextErrors.tests
+    , ContextHandlers.tests
+    , TestLabel "context acceptance" ContextAcceptance.tests
+    , TestLabel "health response value" healthResponseValue
+    , TestLabel "health response json" healthResponseJson
+    , TestLabel "ready response value" readyResponseValue
+    , TestLabel "ready response json" readyResponseJson
+    , TestLabel "context layer merge rules" contextLayerMergeRules
+    , TestLabel "context layer JSON representation" contextLayerJson
+    , TestLabel "context layer rejects blank strings" contextLayerRejectsBlankStrings
+    , TestLabel "context layer rejects invalid operation shapes" contextLayerRejectsInvalidOperationShapes
+    , TestLabel "context layer validates rubric criteria" contextLayerValidatesRubricCriteria
+    , TestLabel "load one context layer" loadOneContextLayer
+    , TestLabel "validate essay path for context" validateEssayPathForContext
+    , TestLabel "resolve inherited context files" resolveInheritedContextFiles
+    , TestLabel "resolveCacheRoot fallback" resolveCacheRootFallback
+    , TestLabel "resolveCacheRoot env override" resolveCacheRootEnvOverride
+    , TestLabel "context API mutations" contextApiMutations
+    , TestLabel "health endpoint" healthEndpoint
+    , TestLabel "ready endpoint" readyEndpoint
+    , TestLabel "list accounts endpoint with sample cache" listAccountsEndpointWithSampleCache
+    , TestLabel "account create and delete endpoints" createAndDeleteAccountEndpoints
+    , TestLabel "create account profile duplicate returns already-exists" createAccountProfileDuplicate
+    , TestLabel "read account profile rejects mismatched accountId" readAccountProfileRejectsMismatchedAccountId
+    , workspaceTests
+    ]
 
 workspaceTests :: Test
-workspaceTests = TestLabel "workspace" $ TestList
-  [ WorkspaceDiscovery.tests
-  , TestLabel "workspace path helpers" workspacePathHelpers
-  , TestLabel "workspace directory and essay persistence" workspacePersistence
-  , TestLabel "workspace delete endpoints" workspaceDeleteEndpoints
-  ]
+workspaceTests =
+  TestLabel "workspace" $
+    TestList
+      [ WorkspaceDiscovery.tests
+      , TestLabel "workspace path helpers" workspacePathHelpers
+      , TestLabel "workspace directory and essay persistence" workspacePersistence
+      , TestLabel "workspace delete endpoints" workspaceDeleteEndpoints
+      ]
 
 workspacePathHelpers :: Test
 workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let promptUpdate = SaveWorkspaceEssayRequest (Just "Assignment") Nothing
       draftUpdate = SaveWorkspaceEssayRequest Nothing (Just "")
-  assertEqual "prompt-only request round-trips without a null markdown field"
-    (Just promptUpdate) (decode (encode promptUpdate))
-  assertEqual "empty draft request round-trips without a null prompt field"
-    (Just draftUpdate) (decode (encode draftUpdate))
+  assertEqual
+    "prompt-only request round-trips without a null markdown field"
+    (Just promptUpdate)
+    (decode (encode promptUpdate))
+  assertEqual
+    "empty draft request round-trips without a null prompt field"
+    (Just draftUpdate)
+    (decode (encode draftUpdate))
   assertEqual "ordinary segment is safe" True (isSafeSegment "History")
   assertEqual "empty segment is unsafe" False (isSafeSegment "")
   assertEqual "dot-dot segment is unsafe" False (isSafeSegment "..")
@@ -155,7 +172,8 @@ workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let root = WorkspaceRoot (cachePath </> "workspace")
       expectedRoot = cachePath </> "workspace"
   createDirectoryIfMissing True expectedRoot
-  assertEqual "safe path resolves beneath root"
+  assertEqual
+    "safe path resolves beneath root"
     (Just (expectedRoot </> "History" </> "Essay"))
     (safeResolvePath root ["History", "Essay"])
   assertEqual "unsafe path is rejected" Nothing (safeResolvePath root ["..", "outside"])
@@ -167,7 +185,8 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   createDirectoryIfMissing True rootPath
 
   createdDirectory <- createWorkspaceDirectory workspace [] "History"
-  assertEqual "directory creation returns its node"
+  assertEqual
+    "directory creation returns its node"
     (WorkspaceDirectoryCreated (WorkspaceNode "History" ["History"] WorkspaceDirectoryNode []))
     createdDirectory
   duplicateDirectory <- createWorkspaceDirectory workspace [] "History"
@@ -184,15 +203,16 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   didSave <- saveWorkspaceEssay workspace ["History", "French-Revolution"] Nothing (Just "# Updated\n")
   assertEqual "existing essay can be saved" True didSave
   savedEssay <- loadWorkspaceEssay workspace ["History", "French-Revolution"]
-  assertEqual "saved content can be loaded" (Just (expectedEssay {markdown = "# Updated\n"})) savedEssay
+  assertEqual "saved content can be loaded" (Just (expectedEssay{markdown = "# Updated\n"})) savedEssay
 
   let essayDirectory = rootPath </> "History" </> "French-Revolution"
   writeFile (essayDirectory </> "prompt.md") "Keep assignment"
   writeFile (essayDirectory </> "context.json") "{invalid"
   emptySaved <- saveWorkspaceEssay workspace ["History", "French-Revolution"] Nothing (Just "")
   assertEqual "empty draft save succeeds despite broken context" True emptySaved
-  assertEqual "empty draft survives reload"
-    (Just (expectedEssay {markdown = "", prompt = "Keep assignment"}))
+  assertEqual
+    "empty draft survives reload"
+    (Just (expectedEssay{markdown = "", prompt = "Keep assignment"}))
     =<< loadWorkspaceEssay workspace ["History", "French-Revolution"]
   assertEqual "saving leaves the prompt unchanged" "Keep assignment"
     =<< readFile (essayDirectory </> "prompt.md")
@@ -200,33 +220,44 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     =<< readFile (essayDirectory </> "context.json")
 
   tree <- listWorkspaceTree workspace
-  assertEqual "tree includes an essay directory as a leaf"
-    [WorkspaceNode "History" ["History"] WorkspaceDirectoryNode
-      [WorkspaceNode "French-Revolution" ["History", "French-Revolution"] WorkspaceEssayNode []]]
+  assertEqual
+    "tree includes an essay directory as a leaf"
+    [ WorkspaceNode
+        "History"
+        ["History"]
+        WorkspaceDirectoryNode
+        [WorkspaceNode "French-Revolution" ["History", "French-Revolution"] WorkspaceEssayNode []]
+    ]
     tree
   writeFile (rootPath </> "History" </> "context.json") "private context"
   invalidEssayDelete <- deleteWorkspaceEssay workspace ["History", "context.json"]
-  assertEqual "non-essay target is distinguished"
+  assertEqual
+    "non-essay target is distinguished"
     (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History", "context.json"]))
     invalidEssayDelete
   missingEssayDelete <- deleteWorkspaceEssay workspace ["History", "Missing"]
-  assertEqual "missing essay is distinguished"
+  assertEqual
+    "missing essay is distinguished"
     (WorkspaceDeleteFailed (WorkspacePathTargetNotFound ["History", "Missing"]))
     missingEssayDelete
   invalidPathDelete <- deleteWorkspaceEssay workspace ["..", "outside.md"]
-  assertEqual "invalid essay path is distinguished"
+  assertEqual
+    "invalid essay path is distinguished"
     (WorkspaceDeleteFailed (WorkspacePathInvalidPath ["..", "outside.md"]))
     invalidPathDelete
   essayDirectoryDelete <- deleteWorkspaceEssay workspace ["History"]
-  assertEqual "essay delete identifies directory targets"
+  assertEqual
+    "essay delete identifies directory targets"
     (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History"]))
     essayDirectoryDelete
   directoryEssayDelete <- deleteWorkspaceDirectory workspace ["History", "French-Revolution"]
-  assertEqual "directory delete rejects essay directories"
+  assertEqual
+    "directory delete rejects essay directories"
     (WorkspaceDeleteFailed (WorkspacePathWrongTargetType ["History", "French-Revolution"]))
     directoryEssayDelete
   rootDelete <- deleteWorkspaceDirectory workspace []
-  assertEqual "workspace root deletion is denied"
+  assertEqual
+    "workspace root deletion is denied"
     (WorkspaceDeleteFailed WorkspacePathRootDenied)
     rootDelete
   let outsideFile = cachePath </> "outside.md"
@@ -234,7 +265,8 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   writeFile outsideFile "outside workspace"
   createFileLink outsideFile linkedEssay
   symlinkDelete <- deleteWorkspaceEssay workspace ["History", "linked.md"]
-  assertEqual "essay symlink failure reports its exact path"
+  assertEqual
+    "essay symlink failure reports its exact path"
     (WorkspaceDeleteFailed (WorkspacePathSymbolicLink ["History", "linked.md"]))
     symlinkDelete
   removeFile linkedEssay
@@ -245,8 +277,10 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   assertEqual "essay deletion removes all internal files" False
     =<< doesDirectoryExist essayDirectory
   emptyCreated <- createWorkspaceEssay workspace ["History"] "Empty" Nothing Nothing
-  assertEqual "creation without text creates an empty draft"
-    (WorkspaceEssayCreated (WorkspaceEssayContent ["History", "Empty"] "Empty" "" "")) emptyCreated
+  assertEqual
+    "creation without text creates an empty draft"
+    (WorkspaceEssayCreated (WorkspaceEssayContent ["History", "Empty"] "Empty" "" ""))
+    emptyCreated
   _ <- createWorkspaceDirectory workspace ["History"] "Notes"
   _ <- createWorkspaceEssay workspace ["History", "Notes"] "Nested" Nothing (Just "# Nested\n")
   didDeleteDirectory <- deleteWorkspaceDirectory workspace ["History"]
@@ -292,7 +326,7 @@ workspaceDeleteEndpoints = TestCase $
 
 healthResponseValue :: Test
 healthResponseValue = TestCase $ do
-  let expected = HealthResponse {status = "ok"}
+  let expected = HealthResponse{status = "ok"}
   assertEqual "health response should be stable" expected healthResponse
 
 healthResponseJson :: Test
@@ -358,18 +392,22 @@ contextLayerMergeRules = TestCase $ do
   assertEqual "tags append and deduplicate" ["writing", "history"] merged.tags
   assertEqual "instructions replace" ["Use sources."] merged.instructions
   assertEqual "empty replacement clears directions" [] merged.grading_directions
-  assertEqual "rubric merge retains and overrides criteria"
-    (Map.fromList
-      [ ("clarity", RubricCriterion 1 Nothing)
-      , ("evidence", RubricCriterion 2 Nothing)
-      ])
+  assertEqual
+    "rubric merge retains and overrides criteria"
+    ( Map.fromList
+        [ ("clarity", RubricCriterion 1 Nothing)
+        , ("evidence", RubricCriterion 2 Nothing)
+        ]
+    )
     merged.rubric
   let cleared =
-        applyLayer merged
-          (layer
-            { ContextType.tags = Just (ReplaceList [])
-            , ContextType.rubric = Just (ReplaceRubric Map.empty)
-            })
+        applyLayer
+          merged
+          ( layer
+              { ContextType.tags = Just (ReplaceList [])
+              , ContextType.rubric = Just (ReplaceRubric Map.empty)
+              }
+          )
   assertEqual "replacement clears tags" [] cleared.tags
   assertEqual "replacement clears rubric" Map.empty cleared.rubric
 
@@ -470,12 +508,15 @@ loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
         , ("escaped top-level key", "{\"title\":null,\"\\u0074itle\":null}")
         , ("nested operation key", "{\"model\":{\"tag\":\"ClearScalar\",\"tag\":\"ClearScalar\"}}")
         ]
-  mapM_ (\(label, source) -> do
-    writeFile contextPath source
-    result <- loadContextLayer workspace relativePath
-    case result of
-      Left (ContextLayerJsonError _ _) -> pure ()
-      other -> assertFailure ("expected duplicate " <> label <> " to fail, got " <> show other)) duplicateKeys
+  mapM_
+    ( \(label, source) -> do
+        writeFile contextPath source
+        result <- loadContextLayer workspace relativePath
+        case result of
+          Left (ContextLayerJsonError _ _) -> pure ()
+          other -> assertFailure ("expected duplicate " <> label <> " to fail, got " <> show other)
+    )
+    duplicateKeys
 
   writeFile contextPath "{invalid"
   invalid <- loadContextLayer workspace relativePath
@@ -484,16 +525,20 @@ loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     other -> assertFailure ("expected JSON error, got " <> show other)
 
   escaped <- loadContextLayer workspace "../context.json"
-  assertEqual "workspace escape is rejected"
-    (Left (ContextLayerInvalidPath "../context.json")) escaped
+  assertEqual
+    "workspace escape is rejected"
+    (Left (ContextLayerInvalidPath "../context.json"))
+    escaped
 
   removeFile contextPath
   let linkedPath = cachePath </> "linked-context.json"
   writeFile linkedPath "{}"
   createFileLink linkedPath contextPath
   linked <- loadContextLayer workspace relativePath
-  assertEqual "context symlink is rejected"
-    (Left (ContextLayerSymbolicLink relativePath)) linked
+  assertEqual
+    "context symlink is rejected"
+    (Left (ContextLayerSymbolicLink relativePath))
+    linked
 
 validateEssayPathForContext :: Test
 validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
@@ -504,18 +549,22 @@ validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> 
       draftPath = essayDirectory </> "essay.md"
   createDirectoryIfMissing True (rootPath </> "History")
 
-  assertEqual "missing essay is an error"
+  assertEqual
+    "missing essay is an error"
     (Left (EffectiveContextEssayNotFound essayPath))
     =<< loadEffectiveContext workspace essayPath
-  assertEqual "missing ancestor is an error"
+  assertEqual
+    "missing ancestor is an error"
     (Left (EffectiveContextEssayNotFound "Missing/Causes"))
     =<< loadEffectiveContext workspace "Missing/Causes"
-  assertEqual "path traversal is rejected"
+  assertEqual
+    "path traversal is rejected"
     (Left (EffectiveContextInvalidPath "../Causes"))
     =<< loadEffectiveContext workspace "../Causes"
 
   createDirectoryIfMissing True essayDirectory
-  assertEqual "ordinary directory without a draft marker is not an essay"
+  assertEqual
+    "ordinary directory without a draft marker is not an essay"
     (Left (EffectiveContextEssayNotFound essayPath))
     =<< loadEffectiveContext workspace essayPath
   writeFile draftPath ""
@@ -526,7 +575,8 @@ validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> 
   let outsidePath = cachePath </> "outside.md"
   writeFile outsidePath "# Outside\n"
   createFileLink outsidePath draftPath
-  assertEqual "draft marker symlink is rejected"
+  assertEqual
+    "draft marker symlink is rejected"
     (Left (EffectiveContextSymbolicLink "History/Causes/essay.md"))
     =<< loadEffectiveContext workspace essayPath
 
@@ -534,7 +584,8 @@ validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> 
   createDirectoryIfMissing True (outsideDirectory </> "Causes")
   writeFile (outsideDirectory </> "Causes" </> "essay.md") "# Linked directory\n"
   createDirectoryLink outsideDirectory (rootPath </> "Linked")
-  assertEqual "ancestor directory symlink is rejected"
+  assertEqual
+    "ancestor directory symlink is rejected"
     (Left (EffectiveContextSymbolicLink "Linked"))
     =<< loadEffectiveContext workspace "Linked/Causes"
 
@@ -547,9 +598,11 @@ resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath ->
       essayDirectory = historyPath </> "French-Revolution"
   createDirectoryIfMissing True essayDirectory
   writeFile (essayDirectory </> "essay.md") "# Causes\n"
-  writeFile (rootPath </> "context.json")
+  writeFile
+    (rootPath </> "context.json")
     "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"student\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"writing\"]}}"
-  writeFile (historyPath </> "context.json")
+  writeFile
+    (historyPath </> "context.json")
     "{\"audience\":{\"tag\":\"SetScalar\",\"contents\":\"advanced\"},\"tags\":{\"tag\":\"AppendList\",\"contents\":[\"history\"]}}"
 
   inherited <- loadEffectiveContext workspace essayPath
@@ -560,11 +613,14 @@ resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath ->
           }
   assertEqual "root and parent contexts resolve in order" (Right expected) inherited
 
-  writeFile (essayDirectory </> "context.json")
+  writeFile
+    (essayDirectory </> "context.json")
     "{\"tags\":{\"tag\":\"ReplaceList\",\"contents\":[\"causes\"]}}"
   replaced <- loadEffectiveContext workspace essayPath
-  assertEqual "nearest directory can replace inherited tags"
-    (Right (expected {tags = ["causes"]})) replaced
+  assertEqual
+    "nearest directory can replace inherited tags"
+    (Right (expected{tags = ["causes"]}))
+    replaced
 
   writeFile (rootPath </> "context.json") "{invalid"
   invalidAncestor <- loadEffectiveContext workspace essayPath
@@ -595,9 +651,9 @@ withEnvVar key newValue action = do
   oldValue <- lookupEnv key
   setMaybe key newValue
   action `finally` setMaybe key oldValue
-  where
-    setMaybe k (Just v) = setEnv k v
-    setMaybe k Nothing = unsetEnv k
+ where
+  setMaybe k (Just v) = setEnv k v
+  setMaybe k Nothing = unsetEnv k
 
 healthEndpoint :: Test
 healthEndpoint = TestCase $
@@ -607,7 +663,7 @@ healthEndpoint = TestCase $
     result <- runClientM healthClient env
     case result of
       Left err -> assertFailure (show err)
-      Right response -> assertEqual "health endpoint should return ok" (HealthResponse {status = "ok"}) response
+      Right response -> assertEqual "health endpoint should return ok" (HealthResponse{status = "ok"}) response
 
 readyEndpoint :: Test
 readyEndpoint = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
@@ -648,7 +704,8 @@ listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cache
         Left err -> assertFailure (show err)
         Right profiles -> do
           let sortProfiles = sortOn (unAccountId . accountId)
-          assertEqual "list accounts endpoint should return fixture accounts"
+          assertEqual
+            "list accounts endpoint should return fixture accounts"
             (sortProfiles expectedProfiles)
             (sortProfiles profiles)
 
@@ -668,7 +725,8 @@ createAccountProfileDuplicate = TestCase $ withEphemeralCacheRoot $ \cachePath -
   firstCreate <- createAccountProfile acctRoot profile
   assertEqual "first account create should succeed" AccountCreated firstCreate
   result <- createAccountProfile acctRoot profile
-  assertEqual "duplicate account create should be rejected"
+  assertEqual
+    "duplicate account create should be rejected"
     AccountAlreadyExists
     result
 
@@ -756,7 +814,7 @@ contextApiMutations = TestCase $
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
             _ :<|> _ :<|> createLayer :<|> updateLayer :<|> deleteLayer = contextClients "contextapi"
             layer = ContextType.ContextLayer Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-            updated = layer {ContextType.title = Just (SetScalar "Updated")}
+            updated = layer{ContextType.title = Just (SetScalar "Updated")}
             root = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) (AccountId "contextapi"))
         account <- runClientM (createAccountClient (CreateAccountRequest "ContextAPI" Nothing)) env
         case account of

@@ -4,19 +4,19 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Types.Workspace
-  ( WorkspaceNodeType (..)
-  , WorkspaceNode (..)
-  , WorkspaceTreeResponse (..)
-  , WorkspaceEssayContent (..)
-  , CreateWorkspaceDirectoryRequest (..)
-  , CreateWorkspaceEssayRequest (..)
-  , SaveWorkspaceEssayRequest (..)
-  , CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayResult (..)
-  , WorkspacePathError (..)
-  , WorkspaceDeleteResult (..)
-  )
+module Essaying.Types.Workspace (
+  WorkspaceNodeType (..),
+  WorkspaceNode (..),
+  WorkspaceTreeResponse (..),
+  WorkspaceEssayContent (..),
+  CreateWorkspaceDirectoryRequest (..),
+  CreateWorkspaceEssayRequest (..),
+  SaveWorkspaceEssayRequest (..),
+  CreateWorkspaceDirectoryResult (..),
+  CreateWorkspaceEssayResult (..),
+  WorkspacePathError (..),
+  WorkspaceDeleteResult (..),
+)
 where
 
 import Control.Monad (unless, when)
@@ -79,7 +79,7 @@ data SaveWorkspaceEssayRequest = SaveWorkspaceEssayRequest
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON SaveWorkspaceEssayRequest where
-  toJSON = genericToJSON defaultOptions {omitNothingFields = True}
+  toJSON = genericToJSON defaultOptions{omitNothingFields = True}
 
 instance FromJSON SaveWorkspaceEssayRequest where
   parseJSON = withObject "SaveWorkspaceEssayRequest" $ \o -> do

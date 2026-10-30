@@ -1,44 +1,44 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Essaying.Handler.Workspace
-  ( workspaceHandler
-  )
+module Essaying.Handler.Workspace (
+  workspaceHandler,
+)
 where
 
-import Essaying.API.V1 (EssayApi, WorkspaceApi)
-import Control.Monad.IO.Class (liftIO)
 import Control.Exception (IOException, try)
-import Essaying.Handler.ContextError (contextError)
-import Essaying.Handler.Ai (aiHandler)
-import Essaying.Persistence.Account (readAccountProfile)
+import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
+import Essaying.API.V1 (EssayApi, WorkspaceApi)
+import Essaying.Handler.Ai (aiHandler)
 import Essaying.Handler.Context (contextHandler)
-import Essaying.Persistence.Workspace
-  ( isSafeSegment
-  , createWorkspaceDirectory
-  , createWorkspaceEssay
-  , deleteWorkspaceDirectory
-  , deleteWorkspaceEssay
-  , listWorkspaceTree
-  , loadWorkspaceEssay
-  , saveWorkspaceEssay
-  )
+import Essaying.Handler.ContextError (contextError)
+import Essaying.Persistence.Account (readAccountProfile)
+import Essaying.Persistence.Workspace (
+  createWorkspaceDirectory,
+  createWorkspaceEssay,
+  deleteWorkspaceDirectory,
+  deleteWorkspaceEssay,
+  isSafeSegment,
+  listWorkspaceTree,
+  loadWorkspaceEssay,
+  saveWorkspaceEssay,
+ )
 import Essaying.Storage (accountRoot, resolveCacheRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..))
-import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryRequest (..)
-  , CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayRequest (..)
-  , CreateWorkspaceEssayResult (..)
-  , WorkspaceEssayContent (..)
-  , WorkspaceNode (..)
-  , WorkspaceTreeResponse (..)
-  , SaveWorkspaceEssayRequest (..)
-  , WorkspacePathError (..)
-  , WorkspaceDeleteResult (..)
-  )
 import Essaying.Types.Storage (WorkspaceRoot)
-import Servant (Server, Handler, NoContent (NoContent), err400, err403, err404, err409, err500, throwError, (:<|>) (..))
+import Essaying.Types.Workspace (
+  CreateWorkspaceDirectoryRequest (..),
+  CreateWorkspaceDirectoryResult (..),
+  CreateWorkspaceEssayRequest (..),
+  CreateWorkspaceEssayResult (..),
+  SaveWorkspaceEssayRequest (..),
+  WorkspaceDeleteResult (..),
+  WorkspaceEssayContent (..),
+  WorkspaceNode (..),
+  WorkspacePathError (..),
+  WorkspaceTreeResponse (..),
+ )
+import Servant (Handler, NoContent (NoContent), Server, err400, err403, err404, err409, err500, throwError, (:<|>) (..))
 
 workspaceHandler :: Text -> Server WorkspaceApi
 workspaceHandler accountIdText =
@@ -54,8 +54,8 @@ essayRoutes :: Text -> [Text] -> Server EssayApi
 essayRoutes accountIdText essayPath =
   loadWorkspaceEssayHandler accountIdText essayPath
     :<|> ( saveWorkspaceEssayHandler accountIdText essayPath
-        :<|> deleteWorkspaceEssayHandler accountIdText essayPath
-        )
+             :<|> deleteWorkspaceEssayHandler accountIdText essayPath
+         )
 
 deleteWorkspaceEssayHandler :: Text -> [Text] -> Handler NoContent
 deleteWorkspaceEssayHandler accountIdText essayPath = do
@@ -146,9 +146,9 @@ resolveContextWorkspaceRoot accountIdText
         Left _ -> contextError err500 "CONTEXT_IO_ERROR" "" "Unable to access the selected account."
         Right Nothing -> contextError err404 "ACCOUNT_NOT_FOUND" "" "Select an existing account."
         Right (Just root) -> pure root
-  where
-    resolve = do
-      cacheRoot <- resolveCacheRoot
-      let root = accountRoot (usersRoot cacheRoot) (AccountId accountIdText)
-      profile <- readAccountProfile root
-      pure (workspaceRoot root <$ profile)
+ where
+  resolve = do
+    cacheRoot <- resolveCacheRoot
+    let root = accountRoot (usersRoot cacheRoot) (AccountId accountIdText)
+    profile <- readAccountProfile root
+    pure (workspaceRoot root <$ profile)

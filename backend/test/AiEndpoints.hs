@@ -1,11 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Full-app prompt and grading replays against local fake providers.
--- Recorded request/response fixtures verify integration without live API calls.
+{- | Full-app prompt and grading replays against local fake providers.
+Recorded request/response fixtures verify integration without live API calls.
+-}
 module AiEndpoints (tests) where
 
+import AiTestSupport (readFixture, withCache, withEnvironment, writeBytes)
 import ApiClients (aiClients)
-import AiTestSupport (readFixture, writeBytes, withCache, withEnvironment)
 import Control.Monad (forM_)
 import Data.Aeson (Value, eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
@@ -19,7 +20,7 @@ import Essaying.Provider.OpenAiCompatible (promptGenerationTask, promptResponseF
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..))
-import Essaying.Types.Ai (PromptRequest (..), PromptResponse (..), GradeRequest (..), GradeResponse (..))
+import Essaying.Types.Ai (GradeRequest (..), GradeResponse (..), PromptRequest (..), PromptResponse (..))
 import Essaying.Types.Context (EffectiveContext (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Network.HTTP.Client (defaultManagerSettings, managerSetProxy, newManager, noProxy)
@@ -29,19 +30,22 @@ import Network.Wai.Handler.Warp (testWithApplication)
 import Servant ((:<|>) ((:<|>)))
 import Servant.Client (BaseUrl (..), Scheme (Http), mkClientEnv, runClientM)
 import System.Directory (copyFile, createDirectoryIfMissing, listDirectory)
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath (takeDirectory, (</>))
 import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
 -- | Verify both prompt model-selection paths and the recorded grading workflow.
 tests :: Test
-tests = TestLabel "AI endpoints through the real application" $ TestList
-  [ promptEndpoint "essay context overrides the account model" (Just "context-model") "context-model"
-  , promptEndpoint "account preference supplies the model when context has none" Nothing "account-model"
-  , gradeEndpoint
-  ]
+tests =
+  TestLabel "AI endpoints through the real application" $
+    TestList
+      [ promptEndpoint "essay context overrides the account model" (Just "context-model") "context-model"
+      , promptEndpoint "account preference supplies the model when context has none" Nothing "account-model"
+      , gradeEndpoint
+      ]
 
--- | Replay the exact grading sample through routing, loading, transport, and normalization.
--- Expected scores/weights are fixture data, not calculated by the helper under test.
+{- | Replay the exact grading sample through routing, loading, transport, and normalization.
+Expected scores/weights are fixture data, not calculated by the helper under test.
+-}
 gradeEndpoint :: Test
 gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ TestCase $ withCache $ \cache -> do
   let fixtures = "test/fixtures/provider"
@@ -51,8 +55,9 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
   recorded <- BL.readFile (fixtures </> "gpt-6.1-sol-grade.response.json")
   recordedRequest <- readFixture (fixtures </> "gpt-6.1-sol-grade.request.json")
   expected <- readFixture (fixtures </> "gpt-6.1-sol-grade.expected.json")
-  writeBytes (profileRoot account) $ encode $
-    AccountProfile (AccountId "grade-sample") "Grade sample" (Just "account-fallback-must-not-win")
+  writeBytes (profileRoot account) $
+    encode $
+      AccountProfile (AccountId "grade-sample") "Grade sample" (Just "account-fallback-must-not-win")
   forM_ expectedFiles $ \relative -> do
     createDirectoryIfMissing True (takeDirectory (workspace </> relative))
     copyFile (fixtures </> "grade-workspace" </> relative) (workspace </> relative)
@@ -64,11 +69,14 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
         respond $ Wai.responseLBS status200 [("Content-Type", "application/json")] recorded
   testWithApplication (pure provider) $ \providerPort ->
     withEnvironment
-      ([ ("HESSAY_CACHE", Just cache)
-       , ("OPENAI_BASE_URL", Just ("http://127.0.0.1:" <> show providerPort <> "/v1/"))
-       , ("OPENAI_API_KEY", Just "test-key")
-       ] <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]) $
-      testWithApplication (pure app) $ \appPort -> do
+      ( [ ("HESSAY_CACHE", Just cache)
+        , ("OPENAI_BASE_URL", Just ("http://127.0.0.1:" <> show providerPort <> "/v1/"))
+        , ("OPENAI_API_KEY", Just "test-key")
+        ]
+          <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]
+      )
+      $ testWithApplication (pure app)
+      $ \appPort -> do
         manager <- newManager (managerSetProxy noProxy defaultManagerSettings)
         let environment = mkClientEnv manager (BaseUrl Http "127.0.0.1" appPort "")
             _ :<|> grade = aiClients "grade-sample"
@@ -77,7 +85,8 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
           Left err -> assertFailure ("grade endpoint failed: " <> show err)
           Right (GradeResponse overall feedback criteria) -> do
             let GradeResponse expectedOverall expectedFeedback expectedCriteria = expected
-            assertBool "weighted overall score is 79.3/100"
+            assertBool
+              "weighted overall score is 79.3/100"
               (not (isNaN overall || isInfinite overall) && abs (overall - expectedOverall) < 1e-10)
             assertEqual "real overall feedback is preserved" expectedFeedback feedback
             assertEqual "real criterion scores and feedback, with application-calculated weights" expectedCriteria criteria
@@ -88,8 +97,10 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
             assertEqual "provider URL includes its API prefix" "/v1/chat/completions" path
             assertEqual "only fake credentials are sent" (Just "Bearer test-key") (lookup "Authorization" headers)
             assertEqual "JSON request" (Just "application/json") (lookup "Content-Type" headers)
-            assertEqual "entire outgoing request matches the real smoke request"
-              (Right recordedRequest) (eitherDecode bytes :: Either String Value)
+            assertEqual
+              "entire outgoing request matches the real smoke request"
+              (Right recordedRequest)
+              (eitherDecode bytes :: Either String Value)
           _ -> assertFailure "expected exactly one grading provider request"
         assertEqual "saved context, draft, and assignment are unchanged" originalFiles
           =<< mapM (BL.readFile . (workspace </>)) expectedFiles
@@ -108,20 +119,33 @@ promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ w
       WorkspaceRoot workspace = workspaceRoot account
       essay = workspace </> "Religion/Comparison"
       instructions = Just "Generate three distinct assignment options."
-      context = EffectiveContext (Just "Hume and Kierkegaard") (Just "Philosophy students")
-        contextModel ["religion"] ["Compare arguments fairly."] [] Map.empty
+      context =
+        EffectiveContext
+          (Just "Hume and Kierkegaard")
+          (Just "Philosophy students")
+          contextModel
+          ["religion"]
+          ["Compare arguments fairly."]
+          []
+          Map.empty
       draft = "# My saved draft\n"
       savedPrompt = "My existing assignment.\n"
   writeBytes (profileRoot account) $ encode (AccountProfile (AccountId "alice") "Alice" (Just "account-model"))
-  writeBytes (workspace </> "context.json") $ encode $ object
-    [ "audience" .= scalar ("Philosophy students" :: Text)
-    , "instructions" .= object ["tag" .= ("AppendList" :: Text), "contents" .= (["Compare arguments fairly."] :: [Text])]
-    ]
-  writeBytes (workspace </> "Religion/context.json") $ encode $ object
-    [ "tags" .= object ["tag" .= ("AppendList" :: Text), "contents" .= (["religion"] :: [Text])] ]
-  writeBytes (essay </> "context.json") $ encode $ object $
-    ["title" .= scalar ("Hume and Kierkegaard" :: Text)]
-      <> maybe [] (\modelValue -> ["model" .= scalar modelValue]) contextModel
+  writeBytes (workspace </> "context.json") $
+    encode $
+      object
+        [ "audience" .= scalar ("Philosophy students" :: Text)
+        , "instructions" .= object ["tag" .= ("AppendList" :: Text), "contents" .= (["Compare arguments fairly."] :: [Text])]
+        ]
+  writeBytes (workspace </> "Religion/context.json") $
+    encode $
+      object
+        ["tags" .= object ["tag" .= ("AppendList" :: Text), "contents" .= (["religion"] :: [Text])]]
+  writeBytes (essay </> "context.json") $
+    encode $
+      object $
+        ["title" .= scalar ("Hume and Kierkegaard" :: Text)]
+          <> maybe [] (\modelValue -> ["model" .= scalar modelValue]) contextModel
   writeBytes (essay </> "essay.md") draft
   writeBytes (essay </> "prompt.md") savedPrompt
   -- A second account catches accidental use of another workspace or preference.
@@ -129,8 +153,10 @@ promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ w
       WorkspaceRoot otherWorkspace = workspaceRoot other
   writeBytes (profileRoot other) $ encode (AccountProfile (AccountId "bob") "Bob" (Just "wrong-account-model"))
   writeBytes (otherWorkspace </> "Religion/Comparison/essay.md") "Other account's draft"
-  writeBytes (otherWorkspace </> "context.json") $ encode $ object
-    ["title" .= scalar ("Wrong account context" :: Text)]
+  writeBytes (otherWorkspace </> "context.json") $
+    encode $
+      object
+        ["title" .= scalar ("Wrong account context" :: Text)]
   received <- newIORef []
   let provider request respond = do
         bytes <- Wai.strictRequestBody request
@@ -138,11 +164,14 @@ promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ w
         respond $ Wai.responseLBS status200 [("Content-Type", "application/json")] recorded
   testWithApplication (pure provider) $ \providerPort ->
     withEnvironment
-      ([ ("HESSAY_CACHE", Just cache)
-       , ("OPENAI_BASE_URL", Just ("http://127.0.0.1:" <> show providerPort <> "/v1/"))
-       , ("OPENAI_API_KEY", Just "test-key")
-       ] <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]) $
-      testWithApplication (pure app) $ \appPort -> do
+      ( [ ("HESSAY_CACHE", Just cache)
+        , ("OPENAI_BASE_URL", Just ("http://127.0.0.1:" <> show providerPort <> "/v1/"))
+        , ("OPENAI_API_KEY", Just "test-key")
+        ]
+          <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]
+      )
+      $ testWithApplication (pure app)
+      $ \appPort -> do
         manager <- newManager (managerSetProxy noProxy defaultManagerSettings)
         let environment = mkClientEnv manager (BaseUrl Http "127.0.0.1" appPort "")
             generate :<|> _ = aiClients "alice"
@@ -164,15 +193,16 @@ promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ w
                 case messages of
                   [("system", task), ("user", input)] -> do
                     assertEqual "prompt generation task" promptGenerationTask task
-                    assertEqual "inherited context and request instructions reach the provider"
+                    assertEqual
+                      "inherited context and request instructions reach the provider"
                       (Right (object ["context" .= context, "instructions" .= instructions]))
                       (eitherDecodeStrict' (TextEncoding.encodeUtf8 input) :: Either String Value)
                   _ -> assertFailure "expected system and user messages"
           _ -> assertFailure "expected exactly one provider request"
         assertEqual "generation preserves the draft" draft =<< BL.readFile (essay </> "essay.md")
         assertEqual "generation preserves the saved assignment" savedPrompt =<< BL.readFile (essay </> "prompt.md")
-  where
-    scalar value = object ["tag" .= ("SetScalar" :: Text), "contents" .= value]
+ where
+  scalar value = object ["tag" .= ("SetScalar" :: Text), "contents" .= value]
 
 -- | Extract outgoing model, response schema, and messages for endpoint assertions.
 providerInput :: Value -> Parser (Text, Bool, Value, [(Text, Text)])
@@ -181,6 +211,10 @@ providerInput = withObject "provider request" $ \request -> do
   streaming <- request .: "stream"
   responseFormat <- request .: "response_format"
   messages <- request .: "messages"
-  parsedMessages <- mapM (withObject "message" $ \message ->
-    (,) <$> message .: "role" <*> message .: "content") messages
+  parsedMessages <-
+    mapM
+      ( withObject "message" $ \message ->
+          (,) <$> message .: "role" <*> message .: "content"
+      )
+      messages
   pure (selectedModel, streaming, responseFormat, parsedMessages)

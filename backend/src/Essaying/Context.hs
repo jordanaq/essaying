@@ -1,24 +1,24 @@
-{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
-module Essaying.Context
-  ( EffectiveContext (..)
-  , emptyEffectiveContext
-  , applyLayer
-  )
+module Essaying.Context (
+  EffectiveContext (..),
+  emptyEffectiveContext,
+  applyLayer,
+)
 where
 
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Essaying.Types.Context
-  ( ContextLayer (..)
-  , EffectiveContext (..)
-  , ListOverride (..)
-  , RubricOverride (..)
-  , RubricCriterion
-  , ScalarOverride (..)
-  )
+import Essaying.Types.Context (
+  ContextLayer (..),
+  EffectiveContext (..),
+  ListOverride (..),
+  RubricCriterion,
+  RubricOverride (..),
+  ScalarOverride (..),
+ )
 
 -- | Starting context before any directory layers are applied.
 emptyEffectiveContext :: EffectiveContext
@@ -33,8 +33,9 @@ emptyEffectiveContext =
     , rubric = Map.empty
     }
 
--- | Apply one child layer to its inherited context. Omitted fields inherit;
--- supplied operations set, append, merge, replace, or clear as requested.
+{- | Apply one child layer to its inherited context. Omitted fields inherit;
+supplied operations set, append, merge, replace, or clear as requested.
+-}
 applyLayer :: EffectiveContext -> ContextLayer -> EffectiveContext
 applyLayer parent layer =
   EffectiveContext
@@ -59,18 +60,19 @@ applyList inherited Nothing = inherited
 applyList inherited (Just (AppendList items)) = inherited <> items
 applyList _ (Just (ReplaceList items)) = items
 
--- | Merge criteria by name, with child definitions taking precedence, or
--- replace the whole inherited rubric.
+{- | Merge criteria by name, with child definitions taking precedence, or
+replace the whole inherited rubric.
+-}
 applyRubric :: Map.Map Text RubricCriterion -> Maybe RubricOverride -> Map.Map Text RubricCriterion
 applyRubric inherited Nothing = inherited
 applyRubric inherited (Just (MergeRubric criteria)) = Map.union criteria inherited
 applyRubric _ (Just (ReplaceRubric criteria)) = criteria
 
 -- | Keep the first occurrence of each tag in its original order.
-deduplicateTags :: Ord a => [a] -> [a]
+deduplicateTags :: (Ord a) => [a] -> [a]
 deduplicateTags = go Set.empty
-  where
-    go _ [] = []
-    go seen (item : rest)
-      | Set.member item seen = go seen rest
-      | otherwise = item : go (Set.insert item seen) rest
+ where
+  go _ [] = []
+  go seen (item : rest)
+    | Set.member item seen = go seen rest
+    | otherwise = item : go (Set.insert item seen) rest

@@ -1,26 +1,25 @@
-module Essaying.Persistence.Account
-  ( createAccountProfile
-  , deleteAccountProfile
-  , saveAccountProfile
-  , readAccountProfile
-  , getAccountNames
-  )
+module Essaying.Persistence.Account (
+  createAccountProfile,
+  deleteAccountProfile,
+  saveAccountProfile,
+  readAccountProfile,
+  getAccountNames,
+)
 where
 
 import Control.Exception (IOException, try)
 import Data.Aeson (decodeFileStrict', encode)
+import Data.ByteString.Lazy qualified as BL
 import Data.List (sort)
+import Data.Text (Text)
+import Data.Text qualified as Text
 import Essaying.Storage (profileRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..))
 import Essaying.Types.Storage (AccountRoot (..), UsersRoot (..), WorkspaceRoot (..), unAccountRoot)
-import Essaying.Utils (isValidAccountName, debug_)
-import Data.Text (Text)
-import qualified Data.Text as Text
+import Essaying.Utils (debug_, isValidAccountName)
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory, removePathForcibly)
 import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
-import qualified Data.ByteString.Lazy as BL
-
 
 debug :: Int -> String -> IO ()
 debug = debug_ "[Account]"
@@ -74,9 +73,10 @@ readAccountProfile accountRoot = do
 
   -- Read profile if it exists; treat malformed or inconsistent data as missing.
   exists <- doesFileExist profilePath
-  profile <- if exists
-    then decodeFileStrict' profilePath
-    else pure Nothing
+  profile <-
+    if exists
+      then decodeFileStrict' profilePath
+      else pure Nothing
 
   case profile of
     Just decodedProfile
@@ -84,9 +84,13 @@ readAccountProfile accountRoot = do
       | otherwise -> do
           let AccountProfile (AccountId accountIdText) _ _ = decodedProfile
               expectedId = expectedAccountIdText accountRoot
-          debug 1 $ "Ignoring profile with mismatched AccountId in " <> profilePath
-            <> ": found=" <> Text.unpack accountIdText
-            <> ", expected=" <> Text.unpack expectedId
+          debug 1 $
+            "Ignoring profile with mismatched AccountId in "
+              <> profilePath
+              <> ": found="
+              <> Text.unpack accountIdText
+              <> ", expected="
+              <> Text.unpack expectedId
           pure Nothing
     Nothing -> pure Nothing
 
