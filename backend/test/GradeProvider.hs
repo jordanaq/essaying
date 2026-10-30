@@ -32,7 +32,7 @@ tests = TestLabel "grading provider decoding" $ TestList $
         (decodeGradeResponse (completion "stop" (payload "Révision utile")))
   ] <> [ TestLabel label $ TestCase $
            assertEqual "invalid envelopes or grading payloads are rejected with a safe error"
-             (Left (GenerationFailed "Invalid grade response")) (decodeGradeResponse bytes)
+             (Left ProviderInvalidResponse) (decodeGradeResponse bytes)
        | (label, bytes) <-
            [ ("malformed envelope", "not JSON")
            , ("no choices", "{\"choices\":[]}")

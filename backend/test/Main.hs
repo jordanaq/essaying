@@ -15,6 +15,7 @@ import GradeFailures qualified
 import ContextErrors qualified
 import ContextHandlers qualified
 import ProviderRequests qualified
+import ProviderErrors qualified
 import WorkspaceDiscovery qualified
 
 import ContextAcceptance qualified
@@ -88,7 +89,7 @@ main = do
   args <- getArgs
   counts <- runTestTT (case args of
     ["--workspace"] -> workspaceTests
-    ["--provider"] -> ProviderRequests.tests
+    ["--provider"] -> TestList [ProviderRequests.tests, ProviderErrors.tests]
     ["--ai"] -> AiEndpoints.tests
     ["--grade"] -> TestList [GradeNormalization.tests, GradeProvider.tests, GradeFailures.tests]
     ["--grade-failures"] -> GradeFailures.tests
@@ -99,6 +100,7 @@ main = do
 tests :: Test
 tests = TestList
   [ ProviderRequests.tests
+  , ProviderErrors.tests
   , AiEndpoints.tests
   , GradeNormalization.tests
   , GradeProvider.tests

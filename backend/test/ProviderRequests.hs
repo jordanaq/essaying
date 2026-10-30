@@ -88,9 +88,17 @@ tests = TestList
         result <- sendRequest manager request
           {proxy = Nothing, responseTimeout = responseTimeoutMicro 20000}
         case result of
-          Left (GenerationFailed _) -> pure ()
+          Left ProviderTimedOut -> pure ()
           Left err -> assertFailure ("unexpected provider error: " <> show err)
           Right _ -> assertFailure "expected a timeout to become a provider error"
+  , TestLabel "connection failure is distinct from a timeout" $ TestCase $ do
+      manager <- newManager (managerSetProxy noProxy defaultManagerSettings)
+      request <- buildRequest (OpenAiProviderConfig "http://127.0.0.1:0/v1" "test-key") (object [])
+      result <- sendRequest manager request
+      case result of
+        Left ProviderConnectionFailed -> pure ()
+        Left err -> assertFailure ("expected connection failure, got " <> show err)
+        Right _ -> assertFailure "port zero must not return a provider response"
   , decoderTests
   , httpResponseTests
   , errorMessageTests
@@ -153,7 +161,7 @@ httpResponseTests = TestLabel "provider HTTP response handling" $ TestList $
   , TestLabel "malformed successful response is a decoding failure" $ TestCase $
       withLocalResponse 200 "not JSON" $ \response ->
         case decodePromptHttpResponse response of
-          Left (GenerationFailed _) -> pure ()
+          Left ProviderInvalidResponse -> pure ()
           other -> assertFailure ("expected decoding failure, got " <> show other)
   ] <> map statusCase
     [ (401, errorBody "  Invalid credentials.  ", Just "Invalid credentials.")
@@ -252,7 +260,7 @@ decoderTests = TestLabel "prompt response decoder" $ TestList $
     validMessage = object ["content" .= ("{\"prompts\":[\"Looks valid\"]}" :: Text)]
     rejected (label, bytes) = TestLabel label $ TestCase $
       case decodePromptResponse bytes of
-        Left (GenerationFailed _) -> pure ()
+        Left ProviderInvalidResponse -> pure ()
         Left err -> assertFailure ("unexpected error type: " <> show err)
         Right _ -> assertFailure "expected malformed or incomplete provider output to be rejected"
 

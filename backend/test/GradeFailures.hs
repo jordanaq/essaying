@@ -55,9 +55,10 @@ tests = TestLabel "grading endpoint rejection and upstream failures" $ TestList 
       createFileLink (root </> "Religion/essay.md") (root </> "Religion/prompt.md")) "Religion" 500
   , rejected "traversal is rejected before provider access" (\_ _ -> pure ()) "../private" 400
   , rejected "absolute path is rejected before provider access" (\_ _ -> pure ()) "/private/essay" 400
-  , configurationFailure "missing provider URL" [("OPENAI_BASE_URL", Nothing)]
-  , configurationFailure "missing API key" [("OPENAI_API_KEY", Nothing)]
-  , configurationFailure "invalid provider URL" [("OPENAI_BASE_URL", Just "not a provider URL")]
+  , configurationFailure "missing provider URL" [("OPENAI_BASE_URL", Nothing)] "Set OPENAI_BASE_URL and OPENAI_API_KEY"
+  , configurationFailure "missing API key" [("OPENAI_API_KEY", Nothing)] "Set OPENAI_BASE_URL and OPENAI_API_KEY"
+  , configurationFailure "invalid provider URL" [("OPENAI_BASE_URL", Just "not a provider URL")] "absolute HTTP or HTTPS"
+  , configurationFailure "multiline API key" [("OPENAI_API_KEY", Just "test-key\ninvalid-header")] "single line"
   , TestLabel "missing assignment is allowed" $ TestCase $ do
       recorded <- BL.readFile "test/fixtures/provider/gpt-6.1-sol-grade.response.json"
       withScenario status200 recorded [] (\_ root -> removeFile (root </> "Religion/prompt.md")) $ \_ requests -> do
@@ -65,13 +66,24 @@ tests = TestLabel "grading endpoint rejection and upstream failures" $ TestList 
         assertEqual "saved draft can be graded without an assignment" 200 (statusCode (simpleStatus response))
         assertEqual "provider was called once" 1 =<< readIORef requests
   ]
-  <> [ TestLabel ("upstream HTTP " <> show code <> " becomes 502") $ TestCase $
+  <> [ TestLabel ("upstream HTTP " <> show code <> " has actionable public feedback") $ TestCase $
          withScenario (mkStatus code "Fixture") upstreamError [] (\_ _ -> pure ()) $ \_ requests -> do
            response <- callGrade "Religion"
-           assertPublicError 502 response
-           assertEqual "safe upstream failure message" "The provider rejected the request" (simpleBody response)
+           assertPublicError expectedStatus response
+           assertEqual "safe actionable failure message" expectedMessage (simpleBody response)
            assertEqual "one provider call, without automatic retry" 1 =<< readIORef requests
-     | code <- [401, 403, 404, 429, 500, 503]
+     | (code, expectedStatus, expectedMessage) <-
+         [ (400, 502, "The AI provider rejected the request. Check the model and support for Chat Completions with strict JSON schemas.")
+         , (401, 502, "AI provider authentication failed. Check OPENAI_API_KEY for the configured provider.")
+         , (403, 502, "The AI provider denied access. Check API key permissions and model access.")
+         , (404, 502, "The AI provider could not find the model or endpoint. Check OPENAI_BASE_URL, the model ID, and Chat Completions support.")
+         , (408, 504, "The AI provider request timed out. Retry or choose a faster model.")
+         , (422, 502, "The AI provider rejected the request. Check the model and support for Chat Completions with strict JSON schemas.")
+         , (429, 502, "The AI provider rate or quota limit was reached. Check quota or billing, or retry later.")
+         , (500, 502, "The AI provider is unavailable. Try again later.")
+         , (503, 502, "The AI provider is unavailable. Try again later.")
+         , (504, 504, "The AI provider request timed out. Retry or choose a faster model.")
+         ]
      ]
   <> [ TestLabel label $ TestCase $
          withScenario status200 bytes [] (\_ _ -> pure ()) $ \_ requests -> do
@@ -94,11 +106,13 @@ rejected label prepare essayPath expectedStatus = TestLabel label $ TestCase $
     assertPublicError expectedStatus response
     assertEqual "rejected input never reaches the provider" 0 =<< readIORef requests
 
-configurationFailure :: String -> [(String, Maybe String)] -> Test
-configurationFailure label overrides = TestLabel label $ TestCase $
+configurationFailure :: String -> [(String, Maybe String)] -> BS.ByteString -> Test
+configurationFailure label overrides expectedGuidance = TestLabel label $ TestCase $
   withScenario status200 "provider must not be called" overrides (\_ _ -> pure ()) $ \_ requests -> do
     response <- callGrade "Religion"
     assertPublicError 500 response
+    assertBool "configuration feedback identifies the correction"
+      (expectedGuidance `BS.isInfixOf` BL.toStrict (simpleBody response))
     assertEqual "invalid configuration never reaches the provider" 0 =<< readIORef requests
 
 callGrade :: FilePath -> IO SResponse
@@ -205,7 +219,7 @@ deadlineTests = TestLabel "real grading deadline cancels an active provider resp
         result <- timeout (135 * 1000000) (generateGrade "gpt-6.1-sol" context essay)
         finished <- getMonotonicTimeNSec
         assertEqual "production deadline, rather than idle timeout, wins"
-          (Just (Left (GenerationFailed "Grading timed out"))) result
+          (Just (Left ProviderTimedOut)) result
         let elapsed = fromIntegral (finished - started) / 1e9 :: Double
         assertBool "the real 120-second deadline is exercised" (elapsed >= 110 && elapsed < 135)
         assertEqual "one request without retries" 1 =<< readIORef requests

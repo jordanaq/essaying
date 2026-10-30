@@ -67,6 +67,6 @@ cabal test haskell-essaying-test --offline --test-options=--grade-deadline --tes
 This test calls the real `generateGrade` wrapper against a loopback provider that
 sends a whitespace heartbeat every second. That prevents the 60-second idle
 timeout from masking the overall deadline. It requires the specific grading
-timeout error at roughly 120 seconds, with one provider request and no retries.
+`ProviderTimedOut` error at roughly 120 seconds, with one provider request and no retries.
 A 135-second test watchdog bounds a regression. No production timeout setting or
 backend implementation is changed to make the test pass.

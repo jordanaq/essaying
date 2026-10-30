@@ -42,7 +42,7 @@ tests = TestLabel "grade validation and normalization" $ TestList $
         (normalizeGrade (grade [("argument", 100, "A"), ("evidence", 60, "E")])
           (rubric [("argument", 0.25), ("evidence", 0.75)]))
   ]
-  <> [ rejects label "Provider grading criteria do not match the rubric" provider expectedRubric
+  <> [ rejects label ProviderInvalidResponse provider expectedRubric
      | (label, provider, expectedRubric) <-
          [ ("missing criterion", grade [("argument", 90, "A")], sampleRubric)
          , ("unexpected criterion", grade [("argument", 90, "A"), ("evidence", 60, "E"), ("extra", 50, "X")], sampleRubric)
@@ -50,21 +50,21 @@ tests = TestLabel "grade validation and normalization" $ TestList $
          , ("missing zero-weight criterion", sampleGrade, rubric [("argument", 2), ("evidence", 1), ("style", 0)])
          ]
      ]
-  <> [ rejects label "Provider grade is outside the valid range"
+  <> [ rejects label ProviderInvalidResponse
          (grade [("argument", invalidScore, "A"), ("evidence", 60, "E")]) sampleRubric
      | (label, invalidScore) <-
          [("negative score", -0.01), ("score above 100", 100.01), ("NaN score", 0 / 0)
          , ("positive infinite score", 1 / 0), ("negative infinite score", -1 / 0)]
      ]
-  <> [ rejects label "Overall feedback is empty" (ProviderGrade feedbackText assessments) sampleRubric
+  <> [ rejects label ProviderInvalidResponse (ProviderGrade feedbackText assessments) sampleRubric
      | (label, feedbackText) <- [("empty overall feedback", ""), ("whitespace-only overall feedback", " \n\t ")]
      , let ProviderGrade _ assessments = sampleGrade
      ]
-  <> [ rejects label "Provider criterion feedback is empty"
+  <> [ rejects label ProviderInvalidResponse
          (grade [("argument", 90, feedbackText), ("evidence", 60, "E")]) sampleRubric
      | (label, feedbackText) <- [("empty criterion feedback", ""), ("whitespace-only criterion feedback", " \n\t ")]
      ]
-  <> [ rejects label "Total weight of rubric criteria is invalid" sampleGrade (rubric weights)
+  <> [ rejects label (GenerationFailed "Total weight of rubric criteria is invalid") sampleGrade (rubric weights)
      | (label, weights) <-
          [ ("all-zero weights", [("argument", 0), ("evidence", 0)])
          , ("negative total weight", [("argument", -2), ("evidence", 1)])
@@ -73,7 +73,7 @@ tests = TestLabel "grade validation and normalization" $ TestList $
          , ("finite weights overflow when summed", [("argument", 1e308), ("evidence", 1e308)])
          ]
      ]
-  <> [ rejects "empty rubric and assessments" "Total weight of rubric criteria is invalid" (grade []) Map.empty ]
+  <> [ rejects "empty rubric and assessments" (GenerationFailed "Total weight of rubric criteria is invalid") (grade []) Map.empty ]
 
 sampleGrade :: ProviderGrade
 sampleGrade = grade [("argument", 90, "Argument feedback"), ("evidence", 60, "Evidence feedback")]
@@ -88,10 +88,10 @@ grade entries = ProviderGrade "Overall feedback" $
 rubric :: [(Text, Double)] -> Map Text RubricCriterion
 rubric entries = Map.fromList [(name, RubricCriterion weight Nothing) | (name, weight) <- entries]
 
-rejects :: String -> Text -> ProviderGrade -> Map Text RubricCriterion -> Test
-rejects label message provider expectedRubric = TestLabel label $ TestCase $
+rejects :: String -> ProviderError -> ProviderGrade -> Map Text RubricCriterion -> Test
+rejects label expectedError provider expectedRubric = TestLabel label $ TestCase $
   assertEqual "rejects the invalid assessment with the expected reason"
-    (Left (GenerationFailed message)) (normalizeGrade provider expectedRubric)
+    (Left expectedError) (normalizeGrade provider expectedRubric)
 
 assertGrade :: Double -> Text -> [(Text, CriterionGrade)] -> Either ProviderError GradeResponse -> Assertion
 assertGrade expectedOverall expectedFeedback expectedCriteria result = case result of

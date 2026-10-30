@@ -41,7 +41,7 @@ import Control.Monad.IO.Class (liftIO)
 import Essaying.Utils (lookupEnvClean)
 import Network.HTTP.Client
   ( Request (..), RequestBody (RequestBodyLBS), applyBearerAuth
-  , Manager, HttpException, Response, httpLbs, newManager, parseRequest, responseTimeoutMicro
+  , Manager, HttpException (..), HttpExceptionContent (..), Response, httpLbs, newManager, parseRequest, responseTimeoutMicro
   , responseBody, responseStatus, setRequestIgnoreStatus
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -161,7 +161,10 @@ loadProviderConfig = do
     (Nothing, Nothing) -> pure $ Left $ ProviderConfigurationMissing "OPENAI_BASE_URL and OPENAI_API_KEY are missing"
     (Nothing, _) -> pure $ Left $ ProviderConfigurationMissing "OPENAI_BASE_URL is missing"
     (_, Nothing) -> pure $ Left $ ProviderConfigurationMissing "OPENAI_API_KEY is missing"
-    (Just url, Just key) -> pure $ Right $ OpenAiProviderConfig url key
+    (Just url, Just key)
+      | Text.any (`elem` ['\r', '\n']) key ->
+          pure $ Left $ ProviderConfigurationInvalid "OPENAI_API_KEY"
+      | otherwise -> pure $ Right $ OpenAiProviderConfig url key
 
 buildRequest :: OpenAiProviderConfig -> Value -> IO Request
 buildRequest (OpenAiProviderConfig url apiKey) body = do
@@ -190,7 +193,18 @@ sendRequest manager request = do
   result <- try (httpLbs (setRequestIgnoreStatus request) manager) :: IO (Either HttpException (Response BL.ByteString))
 
   pure $ case result of
-    Left _ -> Left $ GenerationFailed "Provider request failed"
+    Left (HttpExceptionRequest _ ResponseTimeout) -> Left ProviderTimedOut
+    Left (HttpExceptionRequest _ ConnectionTimeout) -> Left ProviderTimedOut
+    Left (InvalidUrlException _ _) -> Left $ ProviderConfigurationInvalid "OPENAI_BASE_URL"
+    Left (HttpExceptionRequest _ (InvalidDestinationHost _)) -> Left $ ProviderConfigurationInvalid "OPENAI_BASE_URL"
+    Left (HttpExceptionRequest _ (InvalidRequestHeader _)) -> Left $ ProviderConfigurationInvalid "OPENAI_API_KEY"
+    Left (HttpExceptionRequest _ (InvalidStatusLine _)) -> Left ProviderInvalidResponse
+    Left (HttpExceptionRequest _ (InvalidHeader _)) -> Left ProviderInvalidResponse
+    Left (HttpExceptionRequest _ (ResponseBodyTooShort _ _)) -> Left ProviderInvalidResponse
+    Left (HttpExceptionRequest _ InvalidChunkHeaders) -> Left ProviderInvalidResponse
+    Left (HttpExceptionRequest _ IncompleteHeaders) -> Left ProviderInvalidResponse
+    Left (HttpExceptionRequest _ (HttpZlibException _)) -> Left ProviderInvalidResponse
+    Left _ -> Left ProviderConnectionFailed
     Right response -> Right response
 
 parseResponseContent :: Value -> Parser Text
@@ -246,7 +260,7 @@ generatePrompts model context instructions = runExceptT $ do
     generatePromptsWith manager config model context instructions
 
   case result of
-    Nothing -> throwE $ GenerationFailed "Prompt Generation timed out"
+    Nothing -> throwE ProviderTimedOut
     Just res -> ExceptT $ pure res
 
 generatePromptsWith
@@ -263,7 +277,7 @@ generatePromptsWith manager config model context instructions = runExceptT $ do
     (try (buildRequest config body) :: IO (Either HttpException Request))
 
   request <- case requestResult of
-    Left _ -> throwE $ ProviderConfigurationMissing "Invalid provider URL"
+    Left _ -> throwE $ ProviderConfigurationInvalid "OPENAI_BASE_URL"
     Right req -> pure req
 
   response <- ExceptT $ sendRequest manager request
@@ -308,7 +322,7 @@ decodePromptResponse
   :: BL.ByteString
   -> Either ProviderError [Text]
 decodePromptResponse bytes =
-  first (const $ GenerationFailed "Invalid prompt response.") $ do
+  first (const ProviderInvalidResponse) $ do
     envelope <- eitherDecode bytes
     content <- parseEither parseResponseContent envelope
     payload <- eitherDecodeStrict' (TextEncoding.encodeUtf8 content)
@@ -335,7 +349,7 @@ generateGrade model context essay = runExceptT $ do
   result <- liftIO $ timeout (120 * 1000000) $
     generateGradeWith manager config model context essay
   case result of
-    Nothing -> throwE $ GenerationFailed "Grading timed out"
+    Nothing -> throwE ProviderTimedOut
     Just r -> ExceptT $ pure r
 
 generateGradeWith
@@ -352,7 +366,7 @@ generateGradeWith manager config model context essay = runExceptT $ do
     (try (buildRequest config body) :: IO (Either HttpException Request))
 
   request <- case requestResult of
-    Left _ -> throwE $ ProviderConfigurationMissing "Invalid provider URL"
+    Left _ -> throwE $ ProviderConfigurationInvalid "OPENAI_BASE_URL"
     Right req -> pure req
 
   response <- ExceptT $ sendRequest manager request
@@ -425,7 +439,7 @@ decodeGradeResponse
   :: BL.ByteString
   -> Either ProviderError ProviderGrade
 decodeGradeResponse bytes =
-  first (const $ GenerationFailed "Invalid grade response") $ do
+  first (const ProviderInvalidResponse) $ do
     envelope <- eitherDecode bytes
     content <- parseEither parseResponseContent envelope
     eitherDecodeStrict' (TextEncoding.encodeUtf8 content)

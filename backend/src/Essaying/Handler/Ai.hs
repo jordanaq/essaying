@@ -42,6 +42,7 @@ import Servant (
   , err500
   , err501
   , err502
+  , err504
   , throwError
   , (:<|>) (..)
   )
@@ -86,11 +87,25 @@ promptHandler workspaceRoot accountProfile (PromptRequest essayPath instructions
         Right prompts -> pure $ PromptResponse prompts
 
 handleProviderError :: ProviderError -> ServerError
-handleProviderError ModelNotSelected = err422{errBody = "No model selected"}
-handleProviderError ProviderNotImplemented = err501{errBody = "Prompt provider not implemented"}
-handleProviderError (GenerationFailed _) = err502{errBody = "Prompt generation failed"}
-handleProviderError (ProviderConfigurationMissing _) = err500{errBody = "Provider configuration missing "}
-handleProviderError (ProviderHttpError code _) = err502{errBody = "The provider rejected the request"}
+handleProviderError ModelNotSelected = err422{errBody = "Select a model in the essay context or account preferences."}
+handleProviderError ProviderNotImplemented = err501{errBody = "This AI operation is not implemented."}
+handleProviderError (GenerationFailed _) = err502{errBody = "The AI operation failed. Check the input and retry."}
+handleProviderError (ProviderConfigurationMissing _) = err500{errBody = "Set OPENAI_BASE_URL and OPENAI_API_KEY in the backend environment."}
+handleProviderError (ProviderConfigurationInvalid "OPENAI_BASE_URL") = err500{errBody = "Check OPENAI_BASE_URL. Use an absolute HTTP or HTTPS provider API base URL."}
+handleProviderError (ProviderConfigurationInvalid "OPENAI_API_KEY") = err500{errBody = "Check OPENAI_API_KEY. The provider API key must be a single line."}
+handleProviderError (ProviderConfigurationInvalid _) = err500{errBody = "Check OPENAI_BASE_URL and OPENAI_API_KEY in the backend environment."}
+handleProviderError ProviderTimedOut = err504{errBody = "The AI provider request timed out. Retry or choose a faster model."}
+handleProviderError ProviderConnectionFailed = err502{errBody = "Unable to connect to the AI provider. Check OPENAI_BASE_URL and network access."}
+handleProviderError ProviderInvalidResponse = err502{errBody = "The AI provider returned an invalid or incomplete response. Retry or choose a model supporting the required JSON schema."}
+handleProviderError (ProviderHttpError code _)
+  | code == 401 = err502{errBody = "AI provider authentication failed. Check OPENAI_API_KEY for the configured provider."}
+  | code == 403 = err502{errBody = "The AI provider denied access. Check API key permissions and model access."}
+  | code == 404 = err502{errBody = "The AI provider could not find the model or endpoint. Check OPENAI_BASE_URL, the model ID, and Chat Completions support."}
+  | code == 429 = err502{errBody = "The AI provider rate or quota limit was reached. Check quota or billing, or retry later."}
+  | code `elem` [400, 422] = err502{errBody = "The AI provider rejected the request. Check the model and support for Chat Completions with strict JSON schemas."}
+  | code `elem` [408, 504] = handleProviderError ProviderTimedOut
+  | code >= 500 && code < 600 = err502{errBody = "The AI provider is unavailable. Try again later."}
+  | otherwise = err502{errBody = "The AI provider rejected the request. Check provider configuration and model compatibility."}
 
 gradeHandler :: WorkspaceRoot -> AccountProfile -> GradeRequest -> Handler GradeResponse
 gradeHandler workspaceRoot accountProfile (GradeRequest path) = do
@@ -132,10 +147,10 @@ loadEssayForGrading workspaceRoot path = do
 
 normalizeGrade :: ProviderGrade -> Map Text RubricCriterion -> Either ProviderError GradeResponse
 normalizeGrade ProviderGrade{feedback = fb, criteria = crit} rubric
-  | Map.keysSet rubric /= Map.keysSet crit = Left $ GenerationFailed "Provider grading criteria do not match the rubric"
-  | Text.null $ Text.strip fb = Left $ GenerationFailed "Overall feedback is empty"
-  | any (\ProviderCriterionGrade{score = s} -> isNaN s || isInfinite s || s < 0 || s > 100) (Map.elems crit) = Left $ GenerationFailed "Provider grade is outside the valid range"
-  | any (\ProviderCriterionGrade{feedback = f} -> Text.null $ Text.strip f) (Map.elems crit) = Left $ GenerationFailed "Provider criterion feedback is empty"
+  | Map.keysSet rubric /= Map.keysSet crit = Left ProviderInvalidResponse
+  | Text.null $ Text.strip fb = Left ProviderInvalidResponse
+  | any (\ProviderCriterionGrade{score = s} -> isNaN s || isInfinite s || s < 0 || s > 100) (Map.elems crit) = Left ProviderInvalidResponse
+  | any (\ProviderCriterionGrade{feedback = f} -> Text.null $ Text.strip f) (Map.elems crit) = Left ProviderInvalidResponse
   | totalWeight <= 0 || isNaN totalWeight || isInfinite totalWeight = Left $ GenerationFailed "Total weight of rubric criteria is invalid"
   | otherwise = Right $ GradeResponse { overallScore = overallScore
                                       , feedback = fb

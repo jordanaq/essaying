@@ -88,6 +88,7 @@ test-suite haskell-essaying-test
     , GradeFailures
     , ContextAcceptance
     , ProviderRequests
+    , ProviderErrors
     , WorkspaceDiscovery
     , ContextErrors
     , ContextHandlers

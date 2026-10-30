@@ -74,6 +74,10 @@ data ProviderError
   = ModelNotSelected
   | ProviderNotImplemented
   | ProviderConfigurationMissing Text
+  | ProviderConfigurationInvalid Text
+  | ProviderTimedOut
+  | ProviderConnectionFailed
+  | ProviderInvalidResponse
   | ProviderHttpError Int (Maybe Text)
   | GenerationFailed Text
   deriving stock (Show, Eq, Generic)
