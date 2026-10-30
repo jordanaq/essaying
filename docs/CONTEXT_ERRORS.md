@@ -93,7 +93,7 @@ The Context panel currently displays `error.message`. File/field details are
 available in the Network response but are not rendered by the panel. Failed
 effective previews have `Retry preview`; layer/inherited-list reads have `Reload`.
 `Refresh preview` rereads saved effective context without discarding layer edits.
-The mock Grade action requires successful resolution for the current account and
+The Grade essay action requires successful resolution for the current account and
 essay; loading and failures disable it, and retry after repair restores it.
 Selection changes invalidate eligibility and late responses are ignored.
 Collapsing the Context panel preserves resolution state. Rendering file/field
@@ -101,8 +101,10 @@ details (L09) and in-app malformed-layer repair (L08) remain post-MVP.
 
 Draft and assignment loading/editing/saving remain independent of context
 resolution. Backend prompt and grading handlers independently resolve and
-validate context before provider calls. The frontend Grade action still uses
-mock feedback; real frontend AI integration remains E07–E09.
+validate context before provider calls. The frontend Grade action uses real
+backend results. It also requires a nonblank saved draft, a selected model, and
+at least one effective rubric criterion with finite positive total weight.
+An inherited context is sufficient; an essay-local context file is optional.
 
 Ordered contributing-file output and its tests are deferred to stretch task L07;
 they are not required to finish E04. Per-field provenance remains L01.

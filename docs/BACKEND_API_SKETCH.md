@@ -177,6 +177,10 @@ configuration errors return 500; upstream/invalid-response failures generally
 return 502; timeouts return 504. Context errors retain their documented JSON
 envelope; other handlers do not uniformly use that envelope.
 
-The frontend still uses mock grading. Prompt-generation/adoption and real
-grading/results integration remain E07–E09. Streaming and user cancellation are
-post-MVP L10; explorer generation from a folder still needs its workflow defined.
+The frontend connects prompt generation/adoption and real grading/results to
+these complete-response endpoints. It requires saved/discarded pending edits
+before grading, displays overall and criterion feedback, and labels results for
+earlier inputs when editing continues. Effective context can be inherited; no
+essay-local context file or assignment is required. Streaming and user
+cancellation are post-MVP L10; explorer/folder generation is stretch L15 after
+rubric generation L12.

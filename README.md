@@ -13,10 +13,12 @@ OpenAI hosting is not required. Credentials stay server-side. AI actions send re
 essay text and context to the configured provider; local editing and saving do
 not require provider access.
 
-Backend prompt generation and grading return complete JSON responses. Frontend
-generation/adoption and real grading/results integration remain E07–E09; the
-current Grade button uses mock feedback. Streaming and user-initiated
-cancellation are deferred to post-MVP stretch L10.
+Prompt generation and grading return complete JSON responses. The frontend can
+generate and adopt assignment prompts and grade saved essays, displaying overall
+and per-criterion feedback. Grading requires valid effective context with a
+nonempty rubric of finite positive total weight, a selected model, and a saved
+nonblank draft. An essay-local context file and assignment are optional.
+Streaming and user-initiated cancellation are deferred to post-MVP stretch L10.
 
 ## Essay storage
 

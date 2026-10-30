@@ -33,8 +33,15 @@ Frontend will run on http://127.0.0.1:4173 and proxies `/api` to backend on `127
 ## Current UI includes
 
 - Interactive folder tree panel
-- Independent assignment-prompt and draft editors with save/discard controls
-- AI feedback panel with mock grading feedback
+- Ellipsis menus for workspace/folder creation and folder/essay deletion, with
+  keyboard navigation and popup colors that follow the selected theme
+- Independent assignment-prompt and draft editors with save/discard controls,
+  live save/error states, proportional text, soft wrapping, and vertical resizing
+- Collapsible prompt generation with optional instructions and numbered candidates;
+  double-click a candidate or choose **Use this prompt** to apply it to the
+  assignment editor, then **Save Prompt** to persist it
+- Real grading with overall score, per-criterion scores/weights/feedback, and
+  provider error/retry handling
 - API handshake button for `/api/v1/ready`
 - Folder context editor for title, audience, model, tags, instructions, grading directions, and weighted rubric criteria
 - Context inheritance controls (inherit, set/clear, append/replace, merge/replace) and a saved effective-context preview for the selected essay
@@ -51,5 +58,25 @@ selection defaults to its own context layer. Use the scope selector to edit an a
 
 ## Next steps
 
-- Connect prompt generation/adoption and grading/results to the implemented
-  complete-response backend endpoints (E07–E09). Streaming is post-MVP L10.
+- Streaming is post-MVP L10; rendered Markdown editing is stretch L21.
+- Add explorer/folder entry for prompt generation after rubric generation
+  (stretch L15, after L12). Generation from the current
+  essay and adoption are connected. Generation requires resolved, saved context; a future
+  workflow should also support generating a rubric when context is not ready.
+
+**Grade essay** uses the saved draft, optional saved assignment, and resolved
+effective context. Inherited context/rubrics are sufficient: no essay-local
+context file is needed. Grading requires a nonblank saved draft, at least one
+rubric criterion with a finite positive total weight, and a model in effective
+context or the account preference. Save or discard pending edits before grading.
+Starting grading opens Feedback. Editing remains available during the request;
+feedback is labeled as applying to earlier saved inputs if they change. Switching
+essays/accounts clears feedback and prevents late responses from replacing it.
+
+Model choices are curated to eight GPT-6.1, GPT-6, and GPT-5.6 IDs from the
+OpenAI `/v1/models` snapshot fetched on 2026-10-30. The context Model field offers the same IDs as suggestions and still
+accepts custom IDs for other providers. A listed ID does not guarantee support
+for Chat Completions and strict JSON-schema output. The saved context model
+takes precedence over the account preference; the editor toolbar Model selector
+is currently a local UI placeholder and does not change AI requests. Automatic
+endpoint-specific discovery is tracked as L13 on the local completion board.

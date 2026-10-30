@@ -1,8 +1,8 @@
 # Context inheritance design
 
 Status: JSON inheritance, essay-directory storage, account-scoped context APIs,
-and backend provider enforcement implemented; reviewed 2026-10-30. Real frontend
-AI workflows remain E07–E09. Contributing-file output is stretch scope (L07).
+and backend provider enforcement implemented; reviewed 2026-10-30. Frontend
+prompt and grading workflows are connected and manually accepted (E07–E09). Contributing-file output is stretch scope (L07).
 
 ## Purpose and scope
 
@@ -358,7 +358,7 @@ line/column coordinates are not currently emitted. For example:
 ```
 
 The UI currently displays error messages; file/field details are available in
-the HTTP response but are not rendered by the panel (post-MVP L09). The mock
+the HTTP response but are not rendered by the panel (post-MVP L09). The real
 grading button requires a successful context resolution for the current account
 and essay; loading and errors disable it. Backend prompt and grading handlers
 independently resolve and validate context before calling a provider.
@@ -481,14 +481,17 @@ decode to `Nothing`; resolved collection defaults are assigned by the resolver.
 Also implemented: UI preview refresh/gating, essay-local context editing,
 independent draft/assignment saves, unsaved-edit protection, backend provider
 context validation, finite-positive rubric-total validation before network
-access, and grading normalization. Real frontend prompt and grading workflows
-remain E07–E09. Contributing paths are stretch scope L07; caching/file watching
+access, grading normalization, frontend prompt generation/adoption, and real
+grading/results. Grading accepts inherited effective context and requires at
+least one rubric criterion with finite positive total weight; no essay-local
+context file is required. Contributing paths are stretch scope L07; caching/file watching
 and per-field provenance remain optional.
 
 ## Acceptance checks
 
 These describe the implemented resolver and backend provider contract.
-Integrated frontend AI workflow acceptance remains E07–E09.
+Prompt and grading workflow acceptance is complete (E07–E09). Broader
+full-app/provider checks remain E12.
 
 - Root-only, nested, missing-file, and empty-object cases resolve predictably.
 - Nearest scalar operations win; omission and top-level field null inherit;
