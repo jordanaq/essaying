@@ -7,6 +7,7 @@ module Main where
 
 import ContextErrors qualified
 import ContextHandlers qualified
+import ProviderRequests qualified
 import WorkspaceDiscovery qualified
 
 import ContextAcceptance qualified
@@ -105,12 +106,16 @@ accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest 
 main :: IO ()
 main = do
   args <- getArgs
-  counts <- runTestTT (if args == ["--workspace"] then workspaceTests else tests)
+  counts <- runTestTT (case args of
+    ["--workspace"] -> workspaceTests
+    ["--provider"] -> ProviderRequests.tests
+    _ -> tests)
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
 tests :: Test
 tests = TestList
-  [ ContextErrors.tests
+  [ ProviderRequests.tests
+  , ContextErrors.tests
   , ContextHandlers.tests
   , TestLabel "context acceptance" ContextAcceptance.tests
   , TestLabel "health response value" healthResponseValue

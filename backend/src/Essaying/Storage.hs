@@ -8,13 +8,12 @@ module Essaying.Storage
   )
 where
 
-import System.Environment (lookupEnv)
 import System.Directory (createDirectoryIfMissing, getHomeDirectory, makeAbsolute)
 import System.FilePath ((</>), normalise)
 import Data.List (isPrefixOf)
 import qualified Data.Text as Text
 
-import Essaying.Utils (trimStr, debug_)
+import Essaying.Utils (lookupEnvClean, debug_)
 import Essaying.Types.Storage (CacheRoot (..), UsersRoot (..), AccountRoot (..), WorkspaceRoot (..), relativeUsersRoot)
 import Essaying.Types.Account (AccountId (..))
 
@@ -28,11 +27,11 @@ defaultCachePath = "~/.cache/hessaying"
 
 resolveCacheRoot :: IO CacheRoot
 resolveCacheRoot = do
-  hessayCacheEnv <- lookupEnv "HESSAY_CACHE"
+  hessayCacheEnv <- lookupEnvClean "HESSAY_CACHE"
 
   let raw = case hessayCacheEnv of
-        Just s | not (null (trimStr s)) -> trimStr s
-        _ -> defaultCachePath
+        Just s -> Text.unpack s
+        Nothing -> defaultCachePath
 
   expanded <- expandTilde raw
   absPath <- makeAbsolute expanded

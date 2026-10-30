@@ -1,0 +1,53 @@
+{
+  "title": {
+    "tag": "SetScalar",
+    "contents": "Philosophy of religion: Hume and Kierkegaard"
+  },
+  "audience": {
+    "tag": "SetScalar",
+    "contents": "Undergraduate philosophy students writing for an educated reader unfamiliar with these thinkers."
+  },
+  "model": {
+    "tag": "SetScalar",
+    "contents": "gpt-6.1-sol"
+  },
+  "tags": {
+    "tag": "ReplaceList",
+    "contents": ["philosophy", "religion", "Hume", "Kierkegaard"]
+  },
+  "instructions": {
+    "tag": "ReplaceList",
+    "contents": [
+      "Create a focused comparative assignment that requires interpretation and evaluation, not two disconnected summaries.",
+      "Require a defensible thesis, fair treatment of both thinkers, and engagement with a plausible objection.",
+      "Ask for textual support without inventing quotations, page numbers, or required editions."
+    ]
+  },
+  "grading_directions": {
+    "tag": "ReplaceList",
+    "contents": [
+      "Reward accurate interpretation, substantive comparison, and reasoned evaluation rather than agreement with a particular religious position."
+    ]
+  },
+  "rubric": {
+    "tag": "ReplaceRubric",
+    "contents": {
+      "interpretation": {
+        "weight": 3,
+        "description": "Accurately explains each thinker's arguments and relevant concepts."
+      },
+      "comparison": {
+        "weight": 3,
+        "description": "Develops a shared question and explains meaningful similarities and differences."
+      },
+      "evidence": {
+        "weight": 2,
+        "description": "Supports interpretations with relevant primary-text passages and distinguishes authors from speakers or pseudonymous voices where relevant."
+      },
+      "argument": {
+        "weight": 2,
+        "description": "Defends a clear thesis, evaluates arguments, and addresses an objection."
+      }
+    }
+  }
+}

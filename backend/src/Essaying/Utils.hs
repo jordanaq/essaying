@@ -2,6 +2,7 @@
 
 module Essaying.Utils
   ( trimStr
+  , lookupEnvClean
   , debug_
   , toSlugChar
   , slugifyText
@@ -26,6 +27,15 @@ debug_ pre level out = do
   case dbg of
     Just val -> when (read val >= level) $ putStrLn (pre <> " " <> out)
     Nothing -> return ()
+
+-- | Trim an optional setting, treating missing or blank values as absent.
+-- This only cleans text; callers still validate URLs, numbers, and other types.
+lookupEnvClean :: String -> IO (Maybe Text)
+lookupEnvClean key = do
+  raw <- lookupEnv key
+  return $ case Text.strip . Text.pack <$> raw of
+    Just value | not (Text.null value) -> Just value
+    _ -> Nothing
 
 toSlugChar :: Char -> Char
 toSlugChar c
