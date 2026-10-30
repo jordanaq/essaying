@@ -82,8 +82,10 @@ test-suite haskell-essaying-test
   other-modules:
       ApiClients
     , AiEndpoints
+    , AiTestSupport
     , GradeNormalization
     , GradeProvider
+    , GradeFailures
     , ContextAcceptance
     , ProviderRequests
     , WorkspaceDiscovery

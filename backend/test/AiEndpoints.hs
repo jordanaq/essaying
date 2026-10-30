@@ -3,9 +3,9 @@
 module AiEndpoints (tests) where
 
 import ApiClients (aiClients)
-import Control.Exception (bracket)
+import AiTestSupport (readFixture, writeBytes, withCache, withEnvironment)
 import Control.Monad (forM_)
-import Data.Aeson (FromJSON, Value, eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
+import Data.Aeson (Value, eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -26,10 +26,8 @@ import Network.Wai qualified as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Servant ((:<|>) ((:<|>)))
 import Servant.Client (BaseUrl (..), Scheme (Http), mkClientEnv, runClientM)
-import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly)
-import System.Environment (lookupEnv, setEnv, unsetEnv)
+import System.Directory (copyFile, createDirectoryIfMissing, listDirectory)
 import System.FilePath ((</>), takeDirectory)
-import System.IO (hClose, openTempFile)
 import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
 tests :: Test
@@ -92,13 +90,6 @@ gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ Te
           =<< mapM (BL.readFile . (workspace </>)) expectedFiles
         entries <- listDirectory (workspace </> "Religion")
         assertEqual "grading creates no files in the essay" ["essay.md", "prompt.md"] (sort entries)
-
-readFixture :: FromJSON a => FilePath -> IO a
-readFixture path = do
-  bytes <- BL.readFile path
-  case eitherDecode bytes of
-    Left err -> assertFailure ("invalid test fixture: " <> err) >> fail "invalid fixture"
-    Right value -> pure value
 
 promptEndpoint :: String -> Maybe Text -> Text -> Test
 promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ withCache $ \cache -> do
@@ -186,32 +177,3 @@ providerInput = withObject "provider request" $ \request -> do
   parsedMessages <- mapM (withObject "message" $ \message ->
     (,) <$> message .: "role" <*> message .: "content") messages
   pure (selectedModel, streaming, responseFormat, parsedMessages)
-
-writeBytes :: FilePath -> BL.ByteString -> IO ()
-writeBytes path bytes = do
-  createDirectoryIfMissing True (takeDirectory path)
-  BL.writeFile path bytes
-
-withCache :: (FilePath -> IO a) -> IO a
-withCache = bracket acquire removePathForcibly
-  where
-    acquire = do
-      temporary <- getTemporaryDirectory
-      (path, handle) <- openTempFile temporary "essaying-ai-endpoints"
-      hClose handle
-      removeFile path
-      createDirectory path
-      pure path
-
--- Tests run serially. Restore process settings even if an assertion fails;
--- credentials are never logged, and requests use only the literal fake key.
-withEnvironment :: [(String, Maybe String)] -> IO a -> IO a
-withEnvironment settings action = bracket acquire restore (const action)
-  where
-    acquire = do
-      original <- mapM (\(key, _) -> (,) key <$> lookupEnv key) settings
-      forM_ settings apply
-      pure original
-    restore = mapM_ apply
-    apply (key, Nothing) = unsetEnv key
-    apply (key, Just value) = setEnv key value

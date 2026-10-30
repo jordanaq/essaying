@@ -40,3 +40,33 @@ that grading leaves saved files unchanged. Temporary environment changes and
 servers are cleaned up. No live API or `/tmp` capture files are needed for tests.
 The fixture demonstrates compatibility and preserves one real assessment; it
 does not establish agreement with a human grader.
+
+## Failure and deadline checks
+
+`GradeFailures` exercises the real application routing and grading handler with
+temporary sample workspaces and a local fake provider. The regular suite covers
+blank drafts, invalid rubrics/context, absent models/accounts/drafts, unsafe
+paths, unreadable or symlinked assignment files, missing/invalid provider setup,
+upstream HTTP failures, and invalid provider grades. Rejected inputs must make
+zero provider requests; public errors must omit private diagnostics and keys.
+A missing assignment is allowed and has a successful regression case.
+
+Run all fast grading checks from `backend/` inside the development environment:
+
+```sh
+cabal test haskell-essaying-test --offline --test-options=--grade --test-show-details=failures
+```
+
+The production deadline is fixed at 120 seconds. Its slow regression test is
+explicitly separate from the default suite so normal runs stay fast:
+
+```sh
+cabal test haskell-essaying-test --offline --test-options=--grade-deadline --test-show-details=direct
+```
+
+This test calls the real `generateGrade` wrapper against a loopback provider that
+sends a whitespace heartbeat every second. That prevents the 60-second idle
+timeout from masking the overall deadline. It requires the specific grading
+timeout error at roughly 120 seconds, with one provider request and no retries.
+A 135-second test watchdog bounds a regression. No production timeout setting or
+backend implementation is changed to make the test pass.

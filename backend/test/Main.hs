@@ -11,6 +11,7 @@ import ApiClients
 import AiEndpoints qualified
 import GradeNormalization qualified
 import GradeProvider qualified
+import GradeFailures qualified
 import ContextErrors qualified
 import ContextHandlers qualified
 import ProviderRequests qualified
@@ -89,7 +90,9 @@ main = do
     ["--workspace"] -> workspaceTests
     ["--provider"] -> ProviderRequests.tests
     ["--ai"] -> AiEndpoints.tests
-    ["--grade"] -> TestList [GradeNormalization.tests, GradeProvider.tests]
+    ["--grade"] -> TestList [GradeNormalization.tests, GradeProvider.tests, GradeFailures.tests]
+    ["--grade-failures"] -> GradeFailures.tests
+    ["--grade-deadline"] -> GradeFailures.deadlineTests
     _ -> tests)
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
@@ -99,6 +102,7 @@ tests = TestList
   , AiEndpoints.tests
   , GradeNormalization.tests
   , GradeProvider.tests
+  , GradeFailures.tests
   , ContextErrors.tests
   , ContextHandlers.tests
   , TestLabel "context acceptance" ContextAcceptance.tests
