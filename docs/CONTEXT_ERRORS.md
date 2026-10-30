@@ -1,12 +1,12 @@
-# Context error handling draft
+# Context error handling
 
-Status: contract with an initial backend implementation, 2026-10-20.
-This describes the error-handling portion of E04 and extends the existing
-`error.code`, `error.message`, and `error.details` response envelope.
+Status: implemented backend contract, reviewed 2026-10-26. This describes handled
+context API errors and Servant JSON/query decoding failures. It does not promise
+this envelope for unrelated routes or framework errors such as unsupported media
+types. See [CONTEXT_DESIGN.md](CONTEXT_DESIGN.md#backend-and-ui-integration) for
+routes, write bodies, and success responses.
 
-All context endpoints return errors as `Content-Type: application/json`.
-Clients branch on `code`; messages explain the correction the user can make.
-Return the first failure encountered, without partial effective context.
+Errors use `Content-Type: application/json` and the existing envelope:
 
 ```json
 {
@@ -21,115 +21,101 @@ Return the first failure encountered, without partial effective context.
 }
 ```
 
-`details` is always an object. Its members are optional:
+Clients can branch on `code`. `details` is always an object, including `{}` when
+no details are known. Available members are:
 
-| Member | Meaning |
+| Member | Current behavior |
 | --- | --- |
-| `path` | Validated workspace-relative source file or failing path component. Never an absolute path or a symlink target. |
-| `field` | Location within the context layer; for example, `instructions.contents[1]`. Use bracketed JSON strings for keys containing punctuation, such as `rubric.contents["use.of.sources"].weight`. |
-| `line`, `column` | One-based source coordinates, included together only when the decoder supplies reliable positions. |
-| `parameter` | Request input to correct, such as `path` or `contextLayer`. |
+| `path` | Safe workspace-relative file or failing component; omitted for rejected paths and the workspace root. Never an absolute root or symlink destination. |
+| `field` | Location within the context layer, when known, such as `instructions.contents[1]`. Punctuation in keys uses JSON brackets: `rubric.contents["use.of.sources"].weight`. |
+| `parameter` | `path` for invalid-path errors; `contextLayer` for submitted-layer validation errors. Generic request-envelope failures currently have empty details. |
 
-Omit unknown locations rather than inventing them. Request-envelope fields use
-`parameter`; `field` is always relative to the layer, without a `contextLayer`
-prefix. Coordinates refer to the decoded document: the context file for disk
-errors, or the complete request body for request errors.
+Fields are relative to the layer, without a `contextLayer` prefix. Syntax and
+duplicate-key errors have no reliable field location. Line/column coordinates
+are not currently emitted.
 
-| HTTP | Code | Trigger and user-facing message |
+| HTTP | Code | Trigger and current message |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | Malformed request JSON, missing required query/body members, or an invalid request envelope. “Provide a valid request with the required path and context layer.” |
-| 400 | `INVALID_CONTEXT_PATH` | Absolute/traversing/empty path, wrong target filename, or missing parent directory for a layer operation. “Use a workspace-relative context.json path in an existing folder.” |
-| 400 | `INVALID_ESSAY_PATH` | Unsafe path or non-markdown target for effective context. “Use a workspace-relative markdown essay path.” |
-| 403 | `CONTEXT_SYMBOLIC_LINK` | An essay, context file, ancestor, or workspace root is a symbolic link. “Context paths must not pass through symbolic links.” |
-| 404 | `ACCOUNT_NOT_FOUND` | The selected account does not exist. “Select an existing account.” |
-| 404 | `ESSAY_NOT_FOUND` | A valid essay path has no existing essay file. “The essay no longer exists. Refresh the workspace.” |
-| 404 | `CONTEXT_NOT_FOUND` | Layer GET, PUT, or DELETE targets an absent context file. “No context layer exists here. Create one or use inherited settings.” |
-| 409 | `CONTEXT_EXISTS` | POST targets an existing context file, including malformed context. “A context layer already exists. Update or remove it.” |
-| 422 | `INVALID_CONTEXT` | Stored context or a syntactically valid submitted layer fails context validation. Use a specific, application-owned message and available field location. |
-| 500 | `CONTEXT_IO_ERROR` | An unexpected read, write, delete, or filesystem inspection failure. “Unable to access the context file. Check its permissions and try again.” Effective resolution may use “Unable to resolve essay context. Check folder permissions and try again.” |
+| 400 | `INVALID_REQUEST` | Malformed request JSON, missing required query/body members, or invalid envelope. “Provide a valid request with the required path and context layer.” |
+| 400 | `INVALID_ACCOUNT_ID` | Unsafe account ID. “Select a valid account.” |
+| 400 | `INVALID_CONTEXT_PATH` | Unsafe path, wrong target filename, or missing parent directory for a layer operation. “Use an existing directory and a workspace-relative context.json path.” |
+| 400 | `INVALID_ESSAY_PATH` | Unsafe or non-markdown effective-context target. “Use a workspace-relative markdown essay path.” |
+| 403 | `CONTEXT_SYMBOLIC_LINK` | A checked essay/context path component or workspace root is a symlink. “Context paths must not pass through symbolic links.” |
+| 404 | `ACCOUNT_NOT_FOUND` | Missing or invalid selected account profile. “Select an existing account.” |
+| 404 | `ESSAY_NOT_FOUND` | No existing essay at a valid path. “Essay does not exist.” |
+| 404 | `CONTEXT_NOT_FOUND` | Layer GET/PUT/DELETE targets an absent file. “Context does not exist.” |
+| 409 | `CONTEXT_EXISTS` | POST targets an existing layer, including malformed stored JSON. “Context already exists.” |
+| 422 | `INVALID_CONTEXT` | Stored or submitted layer fails validation. An allowlisted validation message is returned; other decoder failures use “Context field has an invalid type, shape, or value.” |
+| 500 | `CONTEXT_IO_ERROR` | Handled filesystem/account access failure. “Unable to access the context file.”, “Unable to resolve essay context.”, or “Unable to access the selected account.” |
 
-Missing layers during effective-context resolution contribute nothing and are
-successful, including when every layer is absent. An unreadable layer is an
-error. Inspect layers from workspace root to essay parent and stop at the first
-broken layer, even if a child would replace its values.
+Malformed stored JSON, duplicate keys, and trailing input use 422 with
+“Context must contain one valid JSON document with unique object keys.”
+Syntactically malformed request JSON uses 400. POST/PUT decode the envelope into
+`ContextWriteRequest`, then validate its raw `contextLayer` in the handler so an
+invalid layer returns 422. Stored files use the strict duplicate-checking decoder;
+this does not imply duplicate-key rejection by the standard request JSON decoder.
 
-For malformed stored JSON, retain `INVALID_CONTEXT`/422 with a message such as
-“Context must contain one valid JSON document.” Duplicate keys, unknown fields,
-invalid operations, blank values, and rubric validation failures also use 422.
-Malformed request-body JSON is instead `INVALID_REQUEST`/400. A valid JSON body
-containing an invalid `contextLayer` uses 422; this distinction requires changes
-to the current Servant decoding boundary.
+The envelope is decoded before the handler resolves the selected account.
+POST/PUT validate the submitted layer before checking its target; callers should
+correct the first returned error rather than rely on precedence for multiple
+invalid inputs. With a valid submitted layer, an existing POST target returns
+409 even if its stored JSON is malformed. PUT can repair malformed stored JSON.
+Mutations acknowledge success only after persistence succeeds.
 
-Validate the account and request envelope before filesystem access. Validate
-path syntax before resolving a target. Then inspect filesystem components and
-perform the operation. At an existing POST target, return 409 even if the stored
-JSON is malformed. PUT may repair malformed stored context with a valid layer.
-Validate submitted layers before writing; acknowledge mutations only after the
-filesystem operation succeeds. Existing filesystem race hardening remains E11.
+Missing layers during effective resolution are skipped. If all are absent,
+resolution succeeds with defaults. Existing invalid or unreadable layers are
+errors. Resolution checks layers from root to essay parent and stops at the first
+broken one, even if a child would replace its values. No partial effective
+context is returned.
 
-Never echo a rejected path. For example, `/home/user/private/context.json` and
-`../other-account/context.json` both produce:
+For example, an absolute or traversing layer path submitted with an otherwise
+valid request returns:
 
 ```json
 {
   "error": {
     "code": "INVALID_CONTEXT_PATH",
-    "message": "Use a workspace-relative context.json path in an existing folder.",
-    "details": { "parameter": "path" }
+    "message": "Use an existing directory and a workspace-relative context.json path.",
+    "details": {"parameter": "path"}
   }
 }
 ```
 
-For paths accepted by syntax validation, report only workspace-relative labels
-produced by the resolver. An offending link is labeled by its location inside
-the workspace, never by its destination; omit `path` for the workspace root.
-Never expose OS exception text, raw parser excerpts, absolute roots, or context
-values in public messages. Do not write raw request bodies or context contents
-to diagnostic logs.
+The response omits the rejected input. Symlink errors identify only the link's
+workspace-relative location. Public messages omit OS exceptions, raw decoder
+excerpts, and context values. The context loader logs file labels without raw
+parser excerpts. Complete account/filesystem-boundary and concurrency hardening
+remains E11.
 
-Preserve structured decoder paths instead of discarding Aeson's path component.
-Semantic validation must attach the offending key/index while validating the
-value; a generic failure after decoding a whole rubric loses that information.
-Only allowlisted application-owned validation messages are returned; other
-decoder failures use a fixed type/shape/value message. Never extract public
-messages from raw decoder excerpts. Syntax or duplicate-key errors may omit `field`
-when the parser cannot identify the location reliably.
+## Frontend behavior and remaining work
 
-Implementation changes belong in the context types/decoder, persistence loader,
-handler response mapping, and Servant request decoding/error formatting. Keep
-one formatter for the error envelope so framework failures use the same JSON
-shape. Preserve existing codes where their meaning already matches this draft.
+The Context panel currently displays `error.message`. File/field details are
+available in the Network response but are not rendered by the panel. Failed
+effective previews have `Retry preview`; layer/inherited-list reads have `Reload`.
+`Refresh preview` rereads saved effective context without discarding layer edits.
+The mock Grade action requires successful resolution for the current account and
+essay; loading and failures disable it, and retry after repair restores it.
+Selection changes invalidate eligibility and late responses are ignored.
+Collapsing the Context panel preserves resolution state. Rendering file/field
+details (L09) and in-app malformed-layer repair (L08) remain post-MVP.
 
-The UI displays the message with the file/field location and offers retry after
-the user fixes the source. Context failures block AI actions while loading,
-editing, and saving essays remain available. The backend independently validates
-context before provider calls. UI wiring is E05; provider enforcement is E06/E08.
+Essay loading/editing/saving remain independent of context resolution. Future
+provider handlers must independently resolve and validate context before calls;
+that enforcement belongs to E06/E08. There are no provider calls yet.
 
-HTTP acceptance coverage should exercise the actual Servant application:
+Ordered contributing-file output and its tests are deferred to stretch task L07;
+they are not required to finish E04. Per-field provenance remains L01.
 
-- Invalid/missing query parameters and malformed request bodies return JSON 400.
-- Invalid submitted layers return 422 with a field; invalid stored layers name
-  their source file, including a broken ancestor overridden by a child.
-- A rubric key containing punctuation and a bad list item retain precise fields.
-- Absolute paths and traversal are absent from every returned message/detail.
-- Symlink failures return 403 with no destination; missing accounts/essays/layers
-  return the appropriate 404; an absent effective layer remains successful.
-- POST collisions return 409, and PUT can repair malformed stored context.
-- Controlled I/O failures return 500 without OS text; failed writes never return
-  success. Avoid tests that depend on permission bits when running as root.
-- Existing editing/saving operations still succeed with broken context.
+## Verification
 
-Do not mark E04 complete from this draft: contributing-path output and the
-implemented, verified diagnostic/error behavior are still required.
+`backend/test/ContextErrors.hs` has eight HTTP regression cases against the actual
+Servant application. They cover stored/submitted field and list-index locations,
+punctuation in criterion names, malformed envelopes and encoded routes, rejected
+paths, missing resources, absent layers, malformed/duplicate/trailing documents,
+symlink/I/O redaction, create collisions, malformed-layer repair, and successful
+essay saving with a broken ancestor.
 
-Implementation evidence (2026-10-20): ContextDiagnostic preserves Aeson field
-paths, context persistence shares the strict decoder, ContextError formats
-responses and redacts invalid paths, and Servant formatters handle invalid
-request envelopes. POST/PUT use a raw-layer request DTO with the same JSON wire
-shape so layer validation can return 422. Context routes also validate account
-selection and return structured missing-account errors. Eight new HTTP
-regression cases run against the actual Servant application.
-
-Source coordinates remain omitted because this parser does not provide reliable
-positions. UI validity wiring, provider enforcement, complete filesystem race
-hardening, and contributing-path output retain their separate board scope.
+The recorded implementation run passed all 64 backend HUnit cases, the backend
+executable build, and all four Chromium browser scenarios. The implementation
+is committed in `3194ad2`. This documentation update does not rerun application
+tests or claim complete E11 hardening or E05 UI behavior.
