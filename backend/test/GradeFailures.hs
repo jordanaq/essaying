@@ -39,6 +39,10 @@ tests = TestLabel "grading endpoint rejection and upstream failures" $ TestList 
   , rejected "whitespace-only draft" (\_ root -> writeBytes (root </> "Religion/essay.md") " \n\t ") "Religion" 422
   , rejected "empty rubric" (\_ root -> setRubric root (object [])) "Religion" 422
   , rejected "all-zero rubric" (\_ root -> setRubric root (object ["argument" .= object ["weight" .= (0 :: Int)]])) "Religion" 422
+  , rejected "finite rubric weights overflow when summed" (\_ root -> setRubric root (object
+      [ "argument" .= object ["weight" .= (1e308 :: Double)]
+      , "evidence" .= object ["weight" .= (1e308 :: Double)]
+      ])) "Religion" 422
   , rejected "negative rubric weight" (\_ root -> setRubric root (object ["argument" .= object ["weight" .= (-1 :: Int)]])) "Religion" 422
   , rejected "malformed stored context" (\_ root -> writeBytes (root </> "context.json") "not JSON") "Religion" 422
   , rejected "no context model or account preference" (\cache root -> do

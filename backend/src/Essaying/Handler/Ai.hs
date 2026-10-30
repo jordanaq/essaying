@@ -114,6 +114,7 @@ gradeHandler workspaceRoot accountProfile (GradeRequest path) = do
   let AccountProfile{preferredModel = accountModel} = accountProfile
       EffectiveContext{model = contextModel, rubric = gradingRubric} = context
       selectedModel = contextModel <|> accountModel
+      totalRubricWeight = sum $ map weight $ Map.elems gradingRubric
 
   essay <- loadEssayForGrading workspaceRoot path
 
@@ -121,8 +122,8 @@ gradeHandler workspaceRoot accountProfile (GradeRequest path) = do
   when (Text.null $ Text.strip essayContent) $
     throwError err422 { errBody = "Essay content is empty" }
 
-  when (not (any (\RubricCriterion {weight = w} -> w > 0) $ Map.elems gradingRubric)) $
-    throwError err422 { errBody = "Grading rubric has no criteria with positive weight" }
+  when (totalRubricWeight <= 0 || isNaN totalRubricWeight || isInfinite totalRubricWeight) $
+    throwError err422 { errBody = "Grading rubric requires a finite, positive total weight" }
 
   case selectedModel of
     Nothing -> throwError $ handleProviderError ModelNotSelected
