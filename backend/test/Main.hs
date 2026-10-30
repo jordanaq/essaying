@@ -8,6 +8,7 @@ import ApiClients
   ( healthClient, readyClient, listAccountsClient, createAccountClient
   , accountByIdClient, workspaceClients, essayClients, contextClients
   )
+import AiEndpoints qualified
 import ContextErrors qualified
 import ContextHandlers qualified
 import ProviderRequests qualified
@@ -85,12 +86,14 @@ main = do
   counts <- runTestTT (case args of
     ["--workspace"] -> workspaceTests
     ["--provider"] -> ProviderRequests.tests
+    ["--ai"] -> AiEndpoints.tests
     _ -> tests)
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
 tests :: Test
 tests = TestList
   [ ProviderRequests.tests
+  , AiEndpoints.tests
   , ContextErrors.tests
   , ContextHandlers.tests
   , TestLabel "context acceptance" ContextAcceptance.tests

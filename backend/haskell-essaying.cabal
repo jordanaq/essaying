@@ -70,6 +70,7 @@ test-suite haskell-essaying-test
   main-is:          Main.hs
   other-modules:
       ApiClients
+    , AiEndpoints
     , ContextAcceptance
     , ProviderRequests
     , WorkspaceDiscovery
