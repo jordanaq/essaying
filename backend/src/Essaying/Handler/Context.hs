@@ -50,6 +50,9 @@ contextHandler resolveRoot =
   withRoot :: (WorkspaceRoot -> Handler a) -> Handler a
   withRoot action = resolveRoot >>= action
 
+{- | Load one workspace-relative @context.json@ layer; absence returns 404.
+Other persistence failures use the structured context error envelope.
+-}
 loadContextHandler :: WorkspaceRoot -> FilePath -> Handler ContextLayer
 loadContextHandler root path = do
   result <- liftIO $ loadContextLayer root path
@@ -58,6 +61,10 @@ loadContextHandler root path = do
     Right Nothing -> contextError err404 "CONTEXT_NOT_FOUND" path "Context does not exist."
     Right (Just layer) -> pure layer
 
+{- | Resolve inherited context for an essay directory containing @essay.md@.
+Translate invalid paths, missing essays, links, invalid layers, and I/O errors
+to structured 400, 404, 403, 422, and 500 responses respectively.
+-}
 effectiveContextHandler :: WorkspaceRoot -> FilePath -> Handler EffectiveContext
 effectiveContextHandler root path = do
   result <- liftIO $ loadEffectiveContext root path
@@ -70,8 +77,10 @@ effectiveContextHandler root path = do
     Left (EffectiveContextJsonError invalid diagnostic) -> contextValidationError invalid Nothing diagnostic
     Left (EffectiveContextIoError invalid _) -> contextError err500 "CONTEXT_IO_ERROR" invalid "Unable to resolve essay context."
 
--- The caller resolves this trusted root from the selected account. Request
--- bodies contain only a workspace-relative context.json path and layer.
+{- | Create a layer below a trusted, account-resolved workspace root.
+An existing context file returns 409, even when its JSON is malformed.
+Request paths identify workspace-relative @context.json@ files.
+-}
 createContextHandler :: WorkspaceRoot -> CreateContextRequest -> Handler ContextLayer
 createContextHandler root (CreateContextRequest path layer) = do
   existing <- liftIO $ loadContextLayer root path
@@ -82,6 +91,9 @@ createContextHandler root (CreateContextRequest path layer) = do
     Left err -> handleContextError err
   persistLayer root path layer
 
+{- | Replace an existing layer, allowing valid input to repair malformed JSON.
+An absent file returns 404; other persistence failures retain their error mapping.
+-}
 updateContextHandler :: WorkspaceRoot -> UpdateContextRequest -> Handler ContextLayer
 updateContextHandler root (UpdateContextRequest path layer) = do
   existing <- liftIO $ loadContextLayer root path
@@ -93,6 +105,9 @@ updateContextHandler root (UpdateContextRequest path layer) = do
     Left err -> handleContextError err
   persistLayer root path layer
 
+{- | Delete a workspace-relative context file and return no content.
+An absent file returns 404; other failures use structured context errors.
+-}
 deleteContextHandler :: WorkspaceRoot -> DeleteContextRequest -> Handler NoContent
 deleteContextHandler root (DeleteContextRequest path) = do
   result <- liftIO $ deleteContextLayer root path
@@ -101,6 +116,9 @@ deleteContextHandler root (DeleteContextRequest path) = do
     Right False -> contextError err404 "CONTEXT_NOT_FOUND" path "Context does not exist."
     Right True -> pure NoContent
 
+{- | Save a validated layer and return it, translating persistence failures
+through 'handleContextError'. Parent directories must already exist.
+-}
 persistLayer :: WorkspaceRoot -> FilePath -> ContextLayer -> Handler ContextLayer
 persistLayer root path layer = do
   result <- liftIO $ saveContextLayer root path layer
@@ -108,6 +126,9 @@ persistLayer root path layer = do
     Left err -> handleContextError err
     Right () -> pure layer
 
+{- | Map invalid paths, links, invalid JSON, and I/O failures to structured
+400, 403, 422, and 500 errors. Raw operating-system diagnostics stay private.
+-}
 handleContextError :: ContextLayerError -> Handler a
 handleContextError err = case err of
   ContextLayerInvalidPath path -> contextError err400 "INVALID_CONTEXT_PATH" path "Use an existing directory and a workspace-relative context.json path."
@@ -116,13 +137,18 @@ handleContextError err = case err of
   -- Do not send operating-system error strings, which may contain absolute paths.
   ContextLayerIoError path _ -> contextError err500 "CONTEXT_IO_ERROR" path "Unable to access the context file."
 
--- Invalid layers are carried across the envelope decoding boundary as JSON.
+{- | Validate the raw layer after envelope decoding, returning 422 with the
+@contextLayer@ parameter on failure, then apply create semantics.
+-}
 createRequest :: WorkspaceRoot -> ContextWriteRequest -> Handler ContextLayer
 createRequest root (ContextWriteRequest path value) =
   case parseContextLayer value of
     Left diagnostic -> contextValidationError path (Just "contextLayer") diagnostic
     Right layer -> createContextHandler root (CreateContextRequest path layer)
 
+{- | Validate the raw layer after envelope decoding, returning 422 with the
+@contextLayer@ parameter on failure, then apply update semantics.
+-}
 updateRequest :: WorkspaceRoot -> ContextWriteRequest -> Handler ContextLayer
 updateRequest root (ContextWriteRequest path value) =
   case parseContextLayer value of

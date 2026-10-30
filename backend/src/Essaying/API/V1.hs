@@ -27,6 +27,7 @@ import Essaying.Types.Workspace (
  )
 import Servant (Capture, CaptureAll, DeleteNoContent, Get, JSON, Patch, Post, PostCreated, Put, QueryParam', ReqBody, Required, Strict, (:<|>) (..), (:>))
 
+-- | Version-one API rooted at @/api/v1@, with health, readiness, and account routes.
 type Api =
   "api"
     :> "v1"
@@ -35,17 +36,22 @@ type Api =
            :<|> "accounts" :> AccountsApi
        )
 
+-- | List or create accounts, or select an account by its captured ID.
 type AccountsApi =
   Get '[JSON] [AccountProfile]
     :<|> ReqBody '[JSON] CreateAccountRequest :> PostCreated '[JSON] AccountProfile
     :<|> Capture "accountId" Text :> AccountApi
 
+-- | Read, patch, or delete a selected account, or access its workspace.
 type AccountApi =
   Get '[JSON] AccountProfile
     :<|> ReqBody '[JSON] UpdateAccountRequest :> Patch '[JSON] AccountProfile
     :<|> DeleteNoContent
     :<|> "workspace" :> WorkspaceApi
 
+{- | Account-scoped workspace tree, essay, directory, context, and AI operations.
+Captured workspace paths are lists of directory-name segments.
+-}
 type WorkspaceApi =
   Get '[JSON] WorkspaceTreeResponse
     :<|> "essays" :> CaptureAll "path" Text :> EssayApi
@@ -55,6 +61,7 @@ type WorkspaceApi =
     :<|> "context" :> ContextApi
     :<|> "ai" :> AiApi
 
+-- | Read, update one content field, or delete the essay at the captured directory path.
 type EssayApi =
   Get '[JSON] WorkspaceEssayContent
     :<|> ReqBody '[JSON] SaveWorkspaceEssayRequest :> Put '[JSON] WorkspaceEssayContent

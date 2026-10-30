@@ -30,6 +30,7 @@ import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
 import Test.HUnit
 
+-- | Allocate a temporary workspace and remove it after the action, including on failure.
 withWorkspace :: (FilePath -> WorkspaceRoot -> IO a) -> IO a
 withWorkspace action = bracket acquire removePathForcibly $ \root -> action root (WorkspaceRoot root)
  where
@@ -41,11 +42,13 @@ withWorkspace action = bracket acquire removePathForcibly $ \root -> action root
     createDirectory path
     pure path
 
+-- | Empty validated layer used by context mutation tests.
 layer :: ContextLayer
 layer = case decode "{}" of
   Just value -> value
   Nothing -> error "empty context fixture must decode"
 
+-- | Require a handler failure with the expected status and JSON content type.
 assertStatus :: Int -> Handler a -> IO ()
 assertStatus expected action = do
   result <- runHandler action
@@ -55,6 +58,7 @@ assertStatus expected action = do
       assertEqual "JSON content type" (Just "application/json") (lookup "Content-Type" (errHeaders err))
     Right _ -> assertFailure ("expected HTTP error " <> show expected)
 
+-- | Check context reads, mutations, repair behavior, and structured handler failures.
 tests :: Test
 tests =
   TestList

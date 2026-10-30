@@ -28,12 +28,16 @@ import Essaying.Types.Account (
 import Essaying.Utils (debug_, isValidAccountName, slugifyText)
 import Servant (Handler, NoContent (NoContent), Server, err400, err404, err409, throwError, (:<|>) (..))
 
+-- | Compose account listing, creation, and account-specific routes.
 accountHandler :: Server AccountsApi
 accountHandler =
   listAccountsHandler
     :<|> createAccountHandler
     :<|> accountByIdHandler
 
+{- | Load profiles in sorted account-name order. A missing, malformed, or
+inconsistent profile causes the whole request to return 404; I/O errors propagate.
+-}
 listAccountsHandler :: Handler [AccountProfile]
 listAccountsHandler = do
   cacheRoot <- liftIO resolveCacheRoot
@@ -42,6 +46,9 @@ listAccountsHandler = do
   profiles <- mapM getAccountProfileHandler accountNames
   pure profiles
 
+{- | Validate the display name and claim its slug as a new account directory.
+Invalid names return 400; an existing directory returns 409.
+-}
 createAccountHandler :: CreateAccountRequest -> Handler AccountProfile
 createAccountHandler req = do
   let CreateAccountRequest reqDisplayName reqPreferredModel = req
@@ -62,6 +69,9 @@ createAccountHandler req = do
 
   pure profile
 
+{- | Recursively remove the account directory, including its workspace.
+Return 404 when the account directory is absent; I/O errors propagate.
+-}
 deleteAccountHandler :: Text -> Handler NoContent
 deleteAccountHandler accountIdText = do
   cacheRoot <- liftIO resolveCacheRoot
@@ -71,6 +81,7 @@ deleteAccountHandler accountIdText = do
     then pure NoContent
     else throwError err404
 
+-- | Bind profile, deletion, and workspace routes to the captured account ID.
 accountByIdHandler :: Text -> Server AccountApi
 accountByIdHandler accountIdText =
   getAccountProfileHandler accountIdText
@@ -78,6 +89,7 @@ accountByIdHandler accountIdText =
     :<|> deleteAccountHandler accountIdText
     :<|> workspaceHandler accountIdText
 
+-- | Read a profile, returning 404 for missing, malformed, or mismatched data.
 getAccountProfileHandler :: Text -> Handler AccountProfile
 getAccountProfileHandler accountIdText = do
   cacheRoot <- liftIO resolveCacheRoot
@@ -88,6 +100,10 @@ getAccountProfileHandler accountIdText = do
     Nothing -> throwError err404
     Just profile -> pure profile
 
+{- | Update supplied profile fields while preserving the account ID.
+Omitted or null fields retain their current values, so this request cannot
+clear the preferred model. Invalid names return 400; missing profiles return 404.
+-}
 updateAccountProfileHandler :: Text -> UpdateAccountRequest -> Handler AccountProfile
 updateAccountProfileHandler accountIdText req = do
   existing <- getAccountProfileHandler accountIdText
@@ -111,5 +127,6 @@ updateAccountProfileHandler accountIdText req = do
   liftIO $ debug_ "[Account]" 2 $ "Updated profile account=" <> show accountIdText
   pure updated
 
+-- | Derive the stable directory ID from the display name using slug normalization.
 makeAccountId :: Text -> AccountId
 makeAccountId = AccountId . slugifyText

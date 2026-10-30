@@ -41,6 +41,7 @@ import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
 import Test.HUnit (Test (..), assertEqual, assertFailure)
 
+-- | Allocate an isolated temporary workspace and remove it even when a case fails.
 withWorkspace :: (FilePath -> WorkspaceRoot -> IO a) -> IO a
 withWorkspace action = bracket acquire removePathForcibly $ \root ->
   action root (WorkspaceRoot root)
@@ -53,6 +54,7 @@ withWorkspace action = bracket acquire removePathForcibly $ \root ->
     createDirectory path
     pure path
 
+-- | Check essay discovery, safe paths, symbolic links, save failures, and deletion boundaries.
 tests :: Test
 tests =
   TestLabel "essay directory discovery" $
@@ -452,7 +454,7 @@ tests =
                 =<< deleteWorkspaceDirectory workspace ["History"]
       ]
 
--- Filesystem validation failures currently propagate as IOException.
+-- | Require a filesystem exception from a save validation failure.
 assertIOException :: IO a -> IO ()
 assertIOException action = do
   result <- try (action >> pure ()) :: IO (Either IOException ())
@@ -460,9 +462,9 @@ assertIOException action = do
     Left _ -> pure ()
     Right () -> assertFailure "expected save to reject the filesystem target"
 
--- TextIO.writeFile opens handles using the locale encoding. A lambda cannot be
--- encoded in Latin-1, so it triggers an actual write failure after acquisition.
--- HUnit runs these cases sequentially; always restore the process-wide encoding.
+{- | Temporarily select Latin-1 so writing a lambda triggers a real encoding failure.
+Restore the process-wide locale afterward; these cases must run serially.
+-}
 withLatin1 :: IO a -> IO a
 withLatin1 action = bracket getLocaleEncoding setLocaleEncoding $ \_ -> do
   setLocaleEncoding latin1

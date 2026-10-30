@@ -91,6 +91,9 @@ import System.Exit (exitFailure)
 import System.FilePath (normalise, takeDirectory, (</>))
 import Test.HUnit (Counts (..), Test (..), assertEqual, assertFailure, runTestTT)
 
+{- | Run all tests or the suite selected by a supported command-line flag.
+Exit unsuccessfully when HUnit reports errors or failures.
+-}
 main :: IO ()
 main = do
   args <- getArgs
@@ -107,6 +110,7 @@ main = do
       )
   if errors counts > 0 || failures counts > 0 then exitFailure else pure ()
 
+-- | Aggregate provider, AI, context, account, health, and workspace regression coverage.
 tests :: Test
 tests =
   TestList
@@ -143,6 +147,7 @@ tests =
     , workspaceTests
     ]
 
+-- | Group workspace discovery, path validation, persistence, and deletion tests.
 workspaceTests :: Test
 workspaceTests =
   TestLabel "workspace" $
@@ -153,6 +158,7 @@ workspaceTests =
       , TestLabel "workspace delete endpoints" workspaceDeleteEndpoints
       ]
 
+-- | Check save-request decoding and workspace path helper behavior.
 workspacePathHelpers :: Test
 workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let promptUpdate = SaveWorkspaceEssayRequest (Just "Assignment") Nothing
@@ -178,6 +184,7 @@ workspacePathHelpers = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     (safeResolvePath root ["History", "Essay"])
   assertEqual "unsafe path is rejected" Nothing (safeResolvePath root ["..", "outside"])
 
+-- | Exercise directory and essay creation, content updates, and recursive deletion.
 workspacePersistence :: Test
 workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
@@ -292,6 +299,7 @@ workspacePersistence = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   savedMissing <- saveWorkspaceEssay workspace ["History", "Missing"] Nothing (Just "nope")
   assertEqual "missing essay cannot be saved" False savedMissing
 
+-- | Verify essay and recursive directory deletion through generated HTTP clients.
 workspaceDeleteEndpoints :: Test
 workspaceDeleteEndpoints = TestCase $
   withEphemeralCacheRoot $ \cachePath -> do
@@ -324,16 +332,19 @@ workspaceDeleteEndpoints = TestCase $
         nestedEssay <- loadWorkspaceEssay wsRoot ["History", "Nested"]
         assertEqual "directory endpoint removes nested essays" Nothing nestedEssay
 
+-- | Check the stable liveness response value.
 healthResponseValue :: Test
 healthResponseValue = TestCase $ do
   let expected = HealthResponse{status = "ok"}
   assertEqual "health response should be stable" expected healthResponse
 
+-- | Check that the liveness payload round-trips through JSON.
 healthResponseJson :: Test
 healthResponseJson = TestCase $ do
   let expected = Just healthResponse
   assertEqual "health response JSON should round-trip" expected (decode (encode healthResponse))
 
+-- | Check that readiness wraps the supplied effective context.
 readyResponseValue :: Test
 readyResponseValue = TestCase $ do
   let sampleContext =
@@ -353,6 +364,7 @@ readyResponseValue = TestCase $ do
           }
   assertEqual "ready response should wrap the provided context" expected (readyResponseFromContext sampleContext)
 
+-- | Check that the readiness payload round-trips through JSON.
 readyResponseJson :: Test
 readyResponseJson = TestCase $ do
   let sampleContext =
@@ -364,6 +376,7 @@ readyResponseJson = TestCase $ do
       expected = Just response
   assertEqual "ready response JSON should round-trip" expected (decode (encode response))
 
+-- | Check scalar and collection inheritance when a child layer is applied.
 contextLayerMergeRules :: Test
 contextLayerMergeRules = TestCase $ do
   let inherited =
@@ -411,6 +424,7 @@ contextLayerMergeRules = TestCase $ do
   assertEqual "replacement clears tags" [] cleared.tags
   assertEqual "replacement clears rubric" Map.empty cleared.rubric
 
+-- | Check the tagged-operation JSON representation of a context layer.
 contextLayerJson :: Test
 contextLayerJson = TestCase $ do
   let source =
@@ -428,6 +442,7 @@ contextLayerJson = TestCase $ do
   assertEqual "documented JSON decodes" (Just expected) (decode source)
   assertEqual "layer JSON round-trips" (Just expected) (decode (encode expected))
 
+-- | Reject whitespace-only scalar and list values in supplied operations.
 contextLayerRejectsBlankStrings :: Test
 contextLayerRejectsBlankStrings = TestCase $ do
   let invalidSources :: [(String, BL.ByteString)]
@@ -443,6 +458,7 @@ contextLayerRejectsBlankStrings = TestCase $ do
     (\(label, source) -> assertEqual label (Nothing :: Maybe ContextType.ContextLayer) (decode source))
     invalidSources
 
+-- | Reject malformed tagged operations and unexpected fields.
 contextLayerRejectsInvalidOperationShapes :: Test
 contextLayerRejectsInvalidOperationShapes = TestCase $ do
   let invalidSources :: [(String, BL.ByteString)]
@@ -461,6 +477,7 @@ contextLayerRejectsInvalidOperationShapes = TestCase $ do
     (\(label, source) -> assertEqual label (Nothing :: Maybe ContextType.ContextLayer) (decode source))
     invalidSources
 
+-- | Check rubric criterion names, descriptions, and finite nonnegative weights.
 contextLayerValidatesRubricCriteria :: Test
 contextLayerValidatesRubricCriteria = TestCase $ do
   let invalidSources :: [(String, BL.ByteString)]
@@ -479,6 +496,7 @@ contextLayerValidatesRubricCriteria = TestCase $ do
     Nothing -> assertFailure "zero-weight rubric criterion should be valid in a layer"
     Just _ -> pure ()
 
+-- | Check missing and valid layers, duplicate keys, malformed JSON, escapes, and links.
 loadOneContextLayer :: Test
 loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
@@ -540,6 +558,7 @@ loadOneContextLayer = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
     (Left (ContextLayerSymbolicLink relativePath))
     linked
 
+-- | Check essay markers, directory identity, and symbolic-link rejection for resolution.
 validateEssayPathForContext :: Test
 validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
@@ -589,6 +608,7 @@ validateEssayPathForContext = TestCase $ withEphemeralCacheRoot $ \cachePath -> 
     (Left (EffectiveContextSymbolicLink "Linked"))
     =<< loadEffectiveContext workspace "Linked/Causes"
 
+-- | Apply ancestor layers in order and propagate invalid ancestor errors.
 resolveInheritedContextFiles :: Test
 resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let rootPath = cachePath </> "workspace"
@@ -628,6 +648,7 @@ resolveInheritedContextFiles = TestCase $ withEphemeralCacheRoot $ \cachePath ->
     Left (EffectiveContextLayerError (ContextLayerJsonError "context.json" _)) -> pure ()
     other -> assertFailure ("expected invalid ancestor error, got " <> show other)
 
+-- | Check the default cache path beneath an isolated home directory.
 resolveCacheRootFallback :: Test
 resolveCacheRootFallback = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let home = cachePath </> "home"
@@ -638,6 +659,7 @@ resolveCacheRootFallback = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
       CacheRoot resolved <- resolveCacheRoot
       assertEqual "fallback should resolve to ~/.cache/hessaying" expected resolved
 
+-- | Check that @HESSAY_CACHE@ overrides the default cache location.
 resolveCacheRootEnvOverride :: Test
 resolveCacheRootEnvOverride = TestCase $ do
   let requested = "/tmp/hessay-cache-test"
@@ -646,6 +668,9 @@ resolveCacheRootEnvOverride = TestCase $ do
     CacheRoot resolved <- resolveCacheRoot
     assertEqual "env override should be used when HESSAY_CACHE is set" expected resolved
 
+{- | Temporarily set or unset a process setting and restore it even on failure.
+Tests using this helper must run serially.
+-}
 withEnvVar :: String -> Maybe String -> IO a -> IO a
 withEnvVar key newValue action = do
   oldValue <- lookupEnv key
@@ -655,6 +680,7 @@ withEnvVar key newValue action = do
   setMaybe k (Just v) = setEnv k v
   setMaybe k Nothing = unsetEnv k
 
+-- | Check liveness through a generated client and temporary HTTP server.
 healthEndpoint :: Test
 healthEndpoint = TestCase $
   testWithApplication (pure app) $ \port -> do
@@ -665,6 +691,7 @@ healthEndpoint = TestCase $
       Left err -> assertFailure (show err)
       Right response -> assertEqual "health endpoint should return ok" (HealthResponse{status = "ok"}) response
 
+-- | Check readiness remains stable with absent, valid, and malformed user context.
 readyEndpoint :: Test
 readyEndpoint = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let profile = AccountProfile (AccountId "alice") "Alice" Nothing
@@ -688,6 +715,7 @@ readyEndpoint = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
       writeFile (root </> "context.json") "{invalid"
       checkReady
 
+-- | List fixture profiles through the full application using an isolated cache.
 listAccountsEndpointWithSampleCache :: Test
 listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let expectedProfiles =
@@ -709,6 +737,7 @@ listAccountsEndpointWithSampleCache = TestCase $ withEphemeralCacheRoot $ \cache
             (sortProfiles expectedProfiles)
             (sortProfiles profiles)
 
+-- | Write a profile fixture beneath its account ID without invoking persistence logic.
 writeAccountProfileFixture :: FilePath -> AccountProfile -> IO ()
 writeAccountProfileFixture cachePath profile = do
   let acctRoot = accountRoot (usersRoot (CacheRoot cachePath)) (accountId profile)
@@ -716,6 +745,7 @@ writeAccountProfileFixture cachePath profile = do
   createDirectoryIfMissing True (takeDirectory path)
   BL.writeFile path (encode profile)
 
+-- | Check that a second directory claim returns already-exists.
 createAccountProfileDuplicate :: Test
 createAccountProfileDuplicate = TestCase $ withEphemeralCacheRoot $ \cachePath -> do
   let acctId = AccountId "alice"
@@ -730,6 +760,7 @@ createAccountProfileDuplicate = TestCase $ withEphemeralCacheRoot $ \cachePath -
     AccountAlreadyExists
     result
 
+-- | Create, fetch, and delete an account through HTTP, then check it is unavailable.
 createAndDeleteAccountEndpoints :: Test
 createAndDeleteAccountEndpoints = TestCase $
   withEphemeralCacheRoot $ \cachePath ->
@@ -770,6 +801,7 @@ createAndDeleteAccountEndpoints = TestCase $
           Right profile ->
             assertFailure ("expected missing account after delete, but got: " <> show profile)
 
+-- | Treat a profile whose ID disagrees with its directory as missing.
 readAccountProfileRejectsMismatchedAccountId :: Test
 readAccountProfileRejectsMismatchedAccountId = TestCase $
   withEphemeralCacheRoot $ \cachePath -> do
@@ -786,6 +818,9 @@ readAccountProfileRejectsMismatchedAccountId = TestCase $
       Nothing
       loaded
 
+{- | Reset the repository test-cache directory before and after the action,
+including on failure. The fixed shared location requires serial execution.
+-}
 withEphemeralCacheRoot :: (FilePath -> IO a) -> IO a
 withEphemeralCacheRoot action = do
   cwd <- getCurrentDirectory
@@ -798,13 +833,14 @@ withEphemeralCacheRoot action = do
   ensureCleanDir cachePath
   action cachePath `finally` ensureCleanDir cachePath
 
+-- | Remove any existing directory tree and recreate an empty fixture directory.
 ensureCleanDir :: FilePath -> IO ()
 ensureCleanDir dirPath = do
   exists <- doesDirectoryExist dirPath
   when exists $ removePathForcibly dirPath
   createDirectoryIfMissing True dirPath
 
--- Exercise the account/workspace route wiring through the generated client.
+-- | Exercise account/workspace route wiring and verify context mutations on disk.
 contextApiMutations :: Test
 contextApiMutations = TestCase $
   withEphemeralCacheRoot $ \cachePath ->

@@ -20,6 +20,9 @@ safePath path
   | all isSafeSegment (Text.splitOn "/" (Text.pack path)) = Just path
   | otherwise = Nothing
 
+{- | Throw a structured context error with a safe workspace-relative path label.
+Invalid-path errors omit the supplied path and identify the @path@ parameter.
+-}
 contextError :: ServerError -> Text -> FilePath -> Text -> Handler a
 contextError status code path message =
   throwError $
@@ -32,6 +35,9 @@ contextError status code path message =
           then ["parameter" .= ("path" :: Text)]
           else []
 
+{- | Return 422 with a sanitized diagnostic, optional parameter, and safe path.
+The diagnostic field identifies the invalid location within the layer.
+-}
 contextValidationError :: FilePath -> Maybe Text -> ContextDiagnostic -> Handler a
 contextValidationError path parameter (ContextDiagnostic field message) =
   throwError $
@@ -40,6 +46,9 @@ contextValidationError path parameter (ContextDiagnostic field message) =
         <> maybe [] (\value -> ["field" .= value]) field
         <> maybe [] (\value -> ["parameter" .= value]) parameter
 
+{- | Generic structured 400 response for context envelope or URL decoding failures.
+Decoder messages and submitted values are omitted.
+-}
 invalidRequestError :: ServerError
 invalidRequestError =
   response
@@ -48,6 +57,9 @@ invalidRequestError =
     "Provide a valid request with the required path and context layer."
     []
 
+{- | Build the JSON error envelope with the supplied status, code, message,
+and detail fields, replacing the response headers with the JSON content type.
+-}
 response :: ServerError -> Text -> Text -> [Pair] -> ServerError
 response status code message details =
   status

@@ -21,16 +21,23 @@ import System.Directory (createDirectory, createDirectoryIfMissing, doesDirector
 import System.FilePath (takeDirectory, takeFileName)
 import System.IO.Error (isAlreadyExistsError)
 
+-- | Emit account persistence messages at the requested @HESSAY_DEBUG@ level.
 debug :: Int -> String -> IO ()
 debug = debug_ "[Account]"
 
+-- | Use the account directory's final component as its expected profile ID.
 expectedAccountIdText :: AccountRoot -> Text
 expectedAccountIdText accountRoot = Text.pack (takeFileName (unAccountRoot accountRoot))
 
+-- | Check that the stored profile ID agrees with its containing directory.
 accountProfileMatchesRoot :: AccountRoot -> AccountProfile -> Bool
 accountProfileMatchesRoot accountRoot (AccountProfile (AccountId accountIdText) _ _) =
   accountIdText == expectedAccountIdText accountRoot
 
+{- | Overwrite @profile.json@ after checking the profile ID against the root.
+Create the workspace and missing parent directories first. An ID mismatch
+raises a user error; filesystem exceptions propagate. The write is not atomic.
+-}
 saveAccountProfile :: AccountRoot -> AccountProfile -> IO ()
 saveAccountProfile accountRoot profile = do
   if accountProfileMatchesRoot accountRoot profile
@@ -43,6 +50,10 @@ saveAccountProfile accountRoot profile = do
   createDirectoryIfMissing True workspacePath
   BL.writeFile profilePath (encode profile)
 
+{- | Atomically claim a new account directory, then save its profile and workspace.
+An existing directory returns 'AccountAlreadyExists'. Other I/O failures
+propagate; failure after the claim can leave a partially initialized directory.
+-}
 createAccountProfile :: AccountRoot -> AccountProfile -> IO CreateAccountProfileResult
 createAccountProfile accountRoot@(AccountRoot accountRootPath) profile = do
   -- Ensure the users root exists before attempting an atomic account-dir claim.
@@ -57,6 +68,9 @@ createAccountProfile accountRoot@(AccountRoot accountRootPath) profile = do
       debug 1 $ "Created account root=" <> show accountRootPath
       pure AccountCreated
 
+{- | Recursively remove the entire account directory, including all workspace data.
+Return False when no directory exists at the root; filesystem exceptions propagate.
+-}
 deleteAccountProfile :: AccountRoot -> IO Bool
 deleteAccountProfile (AccountRoot accountRootPath) = do
   dirExists <- doesDirectoryExist accountRootPath
@@ -67,6 +81,9 @@ deleteAccountProfile (AccountRoot accountRootPath) = do
       pure True
     else pure False
 
+{- | Read @profile.json@, treating absence, malformed JSON, and an ID that
+disagrees with the directory name as Nothing. Filesystem exceptions propagate.
+-}
 readAccountProfile :: AccountRoot -> IO (Maybe AccountProfile)
 readAccountProfile accountRoot = do
   let profilePath = profileRoot accountRoot
@@ -94,6 +111,10 @@ readAccountProfile accountRoot = do
           pure Nothing
     Nothing -> pure Nothing
 
+{- | Return sorted directory-entry names accepted by the account-name validator.
+Entries are not checked for directory type or readable profiles. A missing or
+unreadable users root raises an I/O exception.
+-}
 getAccountNames :: UsersRoot -> IO [Text]
 getAccountNames (UsersRoot usersRootPath) = do
   entries <- map Text.pack <$> listDirectory usersRootPath

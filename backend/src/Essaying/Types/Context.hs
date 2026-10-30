@@ -148,6 +148,9 @@ data EffectiveContextError
   | EffectiveContextLayerError ContextLayerError
   deriving stock (Eq, Show)
 
+{- | Typed layer creation input used after validation. The path identifies a
+workspace-relative @context.json@ file; the trusted root is supplied separately.
+-}
 data CreateContextRequest = CreateContextRequest
   { path :: FilePath
   , contextLayer :: ContextLayer
@@ -155,6 +158,9 @@ data CreateContextRequest = CreateContextRequest
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+{- | Typed replacement layer used after validation. The path identifies an
+existing workspace-relative @context.json@ file, including one with invalid JSON.
+-}
 data UpdateContextRequest = UpdateContextRequest
   { path :: FilePath
   , contextLayer :: ContextLayer
@@ -162,6 +168,9 @@ data UpdateContextRequest = UpdateContextRequest
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+{- | Delete a workspace-relative @context.json@ file. The HTTP decoder requires
+exactly the @path@ field; filesystem validation happens during persistence.
+-}
 data DeleteContextRequest = DeleteContextRequest
   { path :: FilePath
   }
@@ -258,6 +267,9 @@ checkShape _ requiredKeys value@(Object members) = do
     [] -> pure ()
 checkShape _ _ _ = pure ()
 
+{- | Reject the first unexpected object key and retain its diagnostic path.
+Leave non-object values to the enclosing type decoder.
+-}
 rejectUnknown :: [Key] -> Value -> Parser ()
 rejectUnknown allowed (Object members) =
   case filter (`notElem` allowed) (KeyMap.keys members) of
@@ -291,6 +303,7 @@ data ContextDiagnostic = ContextDiagnostic
   }
   deriving stock (Eq, Show)
 
+-- | Convert an application-owned field name to an Aeson object key.
 fromStringKey :: String -> Key
 fromStringKey = Key.fromString
 
@@ -311,6 +324,9 @@ contextDiagnostic (location, message) =
     , "Context list items must not be blank."
     ]
 
+{- | Render a decoder path with dotted identifiers and bracketed indices or
+JSON-quoted keys, preserving names that cannot use identifier notation.
+-}
 renderField :: JSONPath -> Text
 renderField = foldl step ""
  where
@@ -327,6 +343,10 @@ renderField = foldl step ""
         && Text.all (\c -> isAscii c && (isAlphaNum c || c == '_')) rest
     Nothing -> False
 
+{- | Validate a decoded JSON value as a context layer, returning sanitized
+field diagnostics. Byte-level syntax and duplicate-key checks belong to
+'decodeContextLayer', before the value is constructed.
+-}
 parseContextLayer :: Value -> Either ContextDiagnostic ContextLayer
 parseContextLayer = either (Left . contextDiagnostic) Right . iparseEither parseJSON
 

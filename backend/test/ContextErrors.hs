@@ -25,6 +25,9 @@ import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
 import Test.HUnit
 
+{- | Create a temporary account workspace and select its cache for the action.
+Restore @HESSAY_CACHE@ and remove the fixture afterward; tests must run serially.
+-}
 withWorkspace :: (FilePath -> IO a) -> IO a
 withWorkspace action = bracket acquire removePathForcibly $ \cache -> do
   previous <- lookupEnv "HESSAY_CACHE"
@@ -43,9 +46,11 @@ withWorkspace action = bracket acquire removePathForcibly $ \cache -> do
     createDirectory path
     pure path
 
+-- | Context endpoint prefix for the temporary @alice@ account.
 base :: ByteString
 base = "/api/v1/accounts/alice/workspace/context"
 
+-- | Send an in-process JSON request through the full application.
 call :: ByteString -> ByteString -> BL.ByteString -> IO SResponse
 call method url body = runSession (srequest (SRequest request body)) app
  where
@@ -55,11 +60,15 @@ call method url body = runSession (srequest (SRequest request body)) app
       , requestHeaders = [("Content-Type", "application/json")]
       }
 
+-- | Follow object keys in a JSON value, returning Nothing if any step is missing.
 member :: [Key] -> Value -> Maybe Value
 member [] value = Just value
 member (key : keys) (Object value) = KeyMap.lookup key value >>= member keys
 member _ _ = Nothing
 
+{- | Check status, JSON content type, and stable error code; return the decoded
+envelope for additional detail and privacy assertions.
+-}
 assertError :: Int -> Text -> SResponse -> IO Value
 assertError status code response = do
   assertEqual "HTTP status" status (statusCode (simpleStatus response))
@@ -70,9 +79,11 @@ assertError status code response = do
       assertEqual "stable code" (Just (String code)) (member ["error", "code"] value)
       pure value
 
+-- | Build a write envelope around raw layer bytes, allowing malformed layer fixtures.
 writeBody :: ByteString -> BL.ByteString -> BL.ByteString
 writeBody path layer = "{\"path\":" <> encode (BS.unpack path) <> ",\"contextLayer\":" <> layer <> "}"
 
+-- | Exercise context error status codes, diagnostic fields, and private-data omission.
 tests :: Test
 tests =
   TestList

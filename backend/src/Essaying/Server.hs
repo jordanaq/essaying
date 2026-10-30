@@ -16,6 +16,9 @@ import Network.Wai (Application, rawPathInfo)
 import Servant (Context (..), Proxy (..), (:<|>) ((:<|>)))
 import Servant.Server (ErrorFormatters (..), defaultErrorFormatters, serveWithContext)
 
+{- | Serve version-one routes with structured context request-decoding errors.
+Other routes retain Servant's default error formatters.
+-}
 app :: Application
 app =
   serveWithContext

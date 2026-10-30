@@ -38,7 +38,7 @@ import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
 import Test.HUnit
 
--- Every case has a separate temporary workspace; no sample or user data is edited.
+-- | Run a case in its own temporary workspace and remove it even on failure.
 withWorkspace :: (FilePath -> WorkspaceRoot -> IO a) -> IO a
 withWorkspace action = bracket acquire removePathForcibly $ \root -> action root (WorkspaceRoot root)
  where
@@ -50,15 +50,18 @@ withWorkspace action = bracket acquire removePathForcibly $ \root -> action root
     createDirectory path
     pure path
 
+-- | Create parent directories and write a workspace-relative fixture file.
 writeAt :: FilePath -> FilePath -> String -> IO ()
 writeAt root path source = do
   createDirectoryIfMissing True (takeDirectory (root </> path))
   writeFile (root </> path) source
 
+-- | Resolve an essay's context and compare it with an independently expected value.
 assertContext :: String -> WorkspaceRoot -> FilePath -> EffectiveContext -> IO ()
 assertContext label workspace essay expected =
   assertEqual label (Right expected) =<< loadEffectiveContext workspace essay
 
+-- | Acceptance coverage for validation, inheritance, essay identity, and path boundaries.
 tests :: Test
 tests =
   TestList
@@ -74,6 +77,7 @@ tests =
     , TestLabel "directory essay identity boundaries" directoryIdentity
     ]
 
+-- | Reject malformed JSON, duplicate keys, unknown fields, and invalid layer values.
 invalidDocuments :: Test
 invalidDocuments =
   TestList
@@ -115,6 +119,7 @@ invalidDocuments =
         ]
     ]
 
+-- | Check root inheritance, empty layers, preserved text, and unrelated sibling files.
 rootAndEmptyLayers :: Test
 rootAndEmptyLayers = TestCase $ withWorkspace $ \root workspace -> do
   writeAt root "Root Essay/essay.md" "# Root essay"
@@ -130,6 +135,7 @@ rootAndEmptyLayers = TestCase $ withWorkspace $ \root workspace -> do
   writeAt root "Sibling/context.json" "{invalid"
   assertContext "missing intermediate and empty child layers inherit" workspace "Parent/Child" expected
 
+-- | Apply essay-local context without leaking settings between sibling essays.
 essayLocalContext :: Test
 essayLocalContext = TestCase $ withWorkspace $ \root workspace -> do
   writeAt root "Subject/First/essay.md" ""
@@ -180,6 +186,7 @@ essayLocalContext = TestCase $ withWorkspace $ \root workspace -> do
     (Just (WorkspaceEssayContent ["Subject", "First"] "First" "Assignment text is not context JSON." "Updated draft"))
     =<< loadWorkspaceEssay workspace ["Subject", "First"]
 
+-- | Check essay directory identity against marker files and unsafe filesystem shapes.
 directoryIdentity :: Test
 directoryIdentity =
   TestList
@@ -237,6 +244,7 @@ directoryIdentity =
               =<< loadEffectiveContext workspace "Alias"
     ]
 
+-- | Verify that null layer fields inherit existing scalar and collection values.
 nullInheritance :: Test
 nullInheritance = TestCase $ withWorkspace $ \root workspace -> do
   let expected =
@@ -260,6 +268,7 @@ nullInheritance = TestCase $ withWorkspace $ \root workspace -> do
     "{\"title\":null,\"audience\":null,\"model\":null,\"tags\":null,\"instructions\":null,\"grading_directions\":null,\"rubric\":null}"
   assertContext "all null fields inherit" workspace "Child" expected
 
+-- | Check scalar, list, tag, and rubric operations in ancestor-to-child order.
 orderedOperations :: Test
 orderedOperations = TestCase $ withWorkspace $ \root workspace -> do
   let layer = Layer.ContextLayer Nothing Nothing Nothing Nothing Nothing Nothing Nothing
@@ -343,6 +352,7 @@ orderedOperations = TestCase $ withWorkspace $ \root workspace -> do
     "Parent/Child"
     (parentExpected{tags = [], instructions = [], rubric = Map.empty})
 
+-- | Verify that changing an ancestor layer affects later resolutions.
 parentChanges :: Test
 parentChanges = TestCase $ withWorkspace $ \root workspace -> do
   writeAt root "Parent/Child/essay.md" "# Essay"
@@ -363,6 +373,9 @@ parentChanges = TestCase $ withWorkspace $ \root workspace -> do
   assertEqual "resolution writes no parent artifact" ["Child"] =<< listDirectory (root </> "Parent")
   assertEqual "resolution writes no essay-side artifact" ["essay.md"] =<< listDirectory (root </> "Parent/Child")
 
+{- | Exercise unreadable context targets and keep ordinary essay persistence usable
+when context is invalid.
+-}
 ioFailures :: Test
 ioFailures = TestCase $ withWorkspace $ \root workspace -> do
   writeAt root "Root Essay/essay.md" "# Essay"
@@ -382,6 +395,7 @@ ioFailures = TestCase $ withWorkspace $ \root workspace -> do
   assertEqual "load succeeds with invalid context" (Just (WorkspaceEssayContent ["Root Essay"] "Root Essay" "" "# Updated"))
     =<< loadWorkspaceEssay workspace ["Root Essay"]
 
+-- | Reject paths outside the workspace and symbolic-link traversal.
 pathBoundaries :: Test
 pathBoundaries = TestCase $ withWorkspace $ \root workspace -> do
   forM_ ["", "/Essay", "./Essay", "Parent/../Essay", "Parent//Essay", "Parent\\Essay"] $ \path ->
@@ -403,6 +417,7 @@ pathBoundaries = TestCase $ withWorkspace $ \root workspace -> do
   assertEqual "linked context ancestor is rejected" (Left (ContextLayerSymbolicLink "Linked"))
     =<< loadContextLayer workspace "Linked/context.json"
 
+-- | Resolve the repository sample hierarchy and check its inherited settings.
 sampleHierarchy :: Test
 sampleHierarchy = TestCase $ withWorkspace $ \root workspace -> do
   inMonorepo <- doesDirectoryExist "backend/data/sample"
