@@ -288,7 +288,7 @@
   p, li { font-size: .85rem; line-height: 1.5; }
   .context-heading p { margin: 5px 0 18px; color: var(--ctp-subtext0); }
   .context-chip { display: inline-block; font-size: .72rem; border: 1px solid var(--ctp-surface2); border-radius: 20px; padding: 4px 8px; white-space: nowrap; }
-  .context-hint, small { color: var(--ctp-subtext0); font-size: .78rem; line-height: 1.5; }
+  .context-hint, small { color: var(--ctp-subtext0); font-size: .78rem; line-height: 1.5; overflow-wrap: anywhere; }
   .scope-label, .criterion-editor label { display: grid; gap: 6px; font-size: .8rem; }
   input, textarea, select, button { font: inherit; color: var(--ctp-text); background: var(--ctp-mantle); border: 1px solid var(--ctp-surface2); border-radius: 6px; padding: 8px; min-width: 0; max-width: 100%; }
   input, textarea, select { width: 100%; font-size: .82rem; }

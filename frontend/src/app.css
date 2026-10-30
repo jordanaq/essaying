@@ -176,6 +176,7 @@ sl-card::part(header) {
 
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
@@ -184,6 +185,9 @@ sl-card::part(header) {
 
 .panel-header-controls {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   gap: 8px;
   align-items: center;
 }
@@ -397,10 +401,44 @@ sl-tree-item .file-icon::after {
   margin-top: 14px;
   color: var(--ctp-subtext0);
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
 sl-badge::part(base) {
   border-color: color-mix(in oklab, var(--ctp-rosewater) 55%, var(--ctp-surface2) 45%);
+}
+
+.panel-header-controls sl-badge,
+.status-row sl-badge {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.panel-header-controls sl-badge::part(base),
+.status-row sl-badge::part(base) {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.writing-editor {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.writing-editor::part(textarea) {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.65;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.draft-editor::part(textarea) {
+  min-height: 16rem;
 }
 
 sl-input::part(base),
@@ -477,7 +515,7 @@ sl-button[variant="primary"]::part(base) {
 
 @media (max-width: 1200px) {
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .login-grid {
@@ -492,14 +530,19 @@ sl-button[variant="primary"]::part(base) {
     flex-wrap: wrap;
   }
 
-  .panel-header-controls {
-    flex-wrap: wrap;
-    min-width: 0;
+}
+
+@media (max-width: 480px) {
+  main {
+    padding: 12px;
   }
 
-  .panel-header-controls sl-badge {
-    max-width: 100%;
-    overflow-wrap: anywhere;
+  .panel {
+    --padding: 16px;
+  }
+
+  .panel.is-collapsed {
+    --padding: 8px;
   }
 }
 

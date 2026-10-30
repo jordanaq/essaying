@@ -1180,7 +1180,7 @@
           </sl-select>
 
           <section class="assignment-editor" aria-label="Assignment prompt editor">
-            <sl-textarea bind:this={assignmentEditor} label="Assignment prompt" rows="5" value={prompt}
+            <sl-textarea class="writing-editor" bind:this={assignmentEditor} label="Assignment prompt" rows="5" resize="vertical" value={prompt}
               disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
               on:sl-input={(event: Event) => { prompt = (event.target as { value?: string }).value ?? prompt; promptNotice = ""; }}
               placeholder="Describe the assignment, question, or requirements."></sl-textarea>
@@ -1207,8 +1207,10 @@
             {/if}
           </section>
           <sl-textarea
+            class="writing-editor draft-editor"
             label="Essay Markdown"
             rows="18"
+            resize="vertical"
             value={markdown}
             disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
             on:sl-input={handleMarkdownInput}

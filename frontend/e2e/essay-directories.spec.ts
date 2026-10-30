@@ -2,9 +2,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 type Essay = { path: string[]; title: string; prompt: string; markdown: string };
 
-async function setup(page: Page) {
+async function setup(page: Page, firstTitle = "First Essay") {
   const essays: Essay[] = [
-    { path: ["First Essay"], title: "First Essay", prompt: "First assignment", markdown: "First draft" },
+    { path: [firstTitle], title: firstTitle, prompt: "First assignment", markdown: "First draft" },
     { path: ["Second Essay"], title: "Second Essay", prompt: "", markdown: "" }
   ];
   const state = {
@@ -73,6 +73,39 @@ async function setup(page: Page) {
 }
 
 for (const width of [390, 1280]) {
+  test(`editors and context tabs support keyboard navigation at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await setup(page);
+    const prompt = page.getByRole("textbox", { name: "Assignment prompt", exact: true });
+    const draft = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
+    for (const [editor, save] of [[prompt, "Save Prompt"], [draft, "Save Draft"]] as const) {
+      await editor.focus();
+      await editor.press("End");
+      await page.keyboard.type(" edited with keyboard");
+      await page.keyboard.press("Tab");
+      const button = page.getByRole("button", { name: save, exact: true });
+      await expect(button).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("status", { name: save === "Save Prompt" ? "Prompt save status" : "Draft save status" }))
+        .toHaveText(/saved\./);
+      await page.keyboard.press("Shift+Tab");
+      await expect(editor).toBeFocused();
+      await expect(editor).toHaveValue(/ edited with keyboard$/);
+    }
+
+    const context = page.getByRole("tab", { name: "Context", exact: true });
+    const feedback = page.getByRole("tab", { name: "Feedback", exact: true });
+    await context.focus();
+    for (const [key, target] of [["ArrowRight", feedback], ["ArrowRight", context], ["End", feedback], ["Home", context], ["ArrowLeft", feedback]] as const) {
+      await page.keyboard.press(key);
+      await expect(target).toBeFocused();
+      await expect(target).toHaveAttribute("aria-selected", "true");
+      await expect(target).toHaveAttribute("tabindex", "0");
+      const panelId = await target.getAttribute("aria-controls");
+      await expect(page.locator(`#${panelId}`)).toBeVisible();
+    }
+  });
+
   test(`explorer menus preserve selection and support keyboard access at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await setup(page);
@@ -115,6 +148,33 @@ for (const width of [390, 1280]) {
     await expect(selected).toHaveAttribute("selected");
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(prompt).toHaveValue("Unsaved assignment");
+  });
+}
+
+for (const width of [320, 390, 768, 1280]) {
+  test(`long essay names and Markdown wrap within the editor at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await setup(page, "A long essay title " + "UnbrokenTitle".repeat(20));
+    const draft = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
+    const text = "# A heading\n\nA paragraph with **emphasis** and a long link:\nhttps://example.com/" + "long-path".repeat(100);
+    await draft.fill(text);
+    await expect(draft).toHaveValue(text);
+    expect(await draft.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    const typography = await draft.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { font: style.fontFamily, size: parseFloat(style.fontSize), line: parseFloat(style.lineHeight), resize: style.resize };
+    });
+    expect(typography.font).not.toContain("monospace");
+    expect(typography.size).toBeGreaterThanOrEqual(16);
+    expect(typography.line / typography.size).toBeGreaterThanOrEqual(1.5);
+    expect(typography.resize).toBe("vertical");
+    await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Draft save status" })).toHaveText("Draft saved.");
+    const badge = page.locator(".panel-header-controls sl-badge");
+    const rectangle = await badge.boundingBox();
+    expect(rectangle!.x).toBeGreaterThanOrEqual(0);
+    expect(rectangle!.x + rectangle!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
 
