@@ -5,8 +5,7 @@ This repository is a monorepo with a local-first architecture.
 ## Directories
 
 - backend/: Haskell API server and backend logic
-- frontend/: Elm UI application
-- shared/: cross-stack schemas, fixtures, and docs
+- frontend/: Svelte + TypeScript UI application
 - docs/: architecture and planning documents
 - nix/: reusable Nix modules and scripts
 

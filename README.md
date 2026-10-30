@@ -2,19 +2,50 @@
 
 Local-first essay platform with a Haskell backend and Svelte frontend.
 
-## Planned AI provider integration (E06)
+## AI provider integration
 
-AI operations will support any provider implementing the required
-OpenAI-compatible API, with a configurable provider base URL, API key, and model
-ID. OpenAI hosting is not required. Proposed backend environment settings are
-`OPENAI_BASE_URL` and `OPENAI_API_KEY`; provider integration and these settings
-are not implemented yet. Credentials stay server-side. AI actions send relevant
+Backend prompt and grading endpoints support providers implementing Chat
+Completions with strict JSON-schema output. Configure `OPENAI_BASE_URL` and
+`OPENAI_API_KEY` in the backend environment and select a model in context or
+account preferences. Use the provider API base URL (for example,
+`https://api.openai.com/v1`); the backend appends `/chat/completions`.
+OpenAI hosting is not required. Credentials stay server-side. AI actions send relevant
 essay text and context to the configured provider; local editing and saving do
 not require provider access.
 
-MVP prompt generation and grading will return complete JSON responses, with a
-pending state in the UI. Streaming and user-initiated cancellation are deferred
-to post-MVP stretch L10.
+Backend prompt generation and grading return complete JSON responses. Frontend
+generation/adoption and real grading/results integration remain E07–E09; the
+current Grade button uses mock feedback. Streaming and user-initiated
+cancellation are deferred to post-MVP stretch L10.
+
+## Essay storage
+
+`HESSAY_CACHE` selects the cache root; the default is `~/.cache/hessaying`.
+Each account has `users/<accountId>/profile.json` and a `workspace/` directory:
+
+```text
+workspace/
+├── context.json
+└── History/
+    ├── context.json
+    └── Causes/
+        ├── essay.md
+        ├── prompt.md
+        └── context.json
+```
+
+`History/Causes` identifies the essay. Its required `essay.md` stores the draft;
+`prompt.md` is optional and stores the assignment. Context is optional at every
+level and resolves from the workspace root through the essay's own directory.
+The explorer shows essays as leaves. Draft and assignment save independently;
+empty text clears a field, and deleting an essay removes its whole directory.
+Context errors leave local editing and saving available.
+
+The existing cache has been converted to this format. Migration is complete;
+there is no startup conversion or legacy-layout verification step.
+See [the storage contract](docs/ESSAY_DIRECTORY_PLAN.md),
+[API reference](docs/BACKEND_API_SKETCH.md), and
+[context contract](docs/CONTEXT_DESIGN.md).
 
 ## Start Components
 

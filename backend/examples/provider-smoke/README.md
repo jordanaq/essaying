@@ -66,7 +66,7 @@ the output was incomplete. Model access is specific to your provider/account.
 For another provider, change the base URL and key and select its exact accessible
 model ID in `workspace/context.json`, then regenerate the request. Do not assume
 Nous Portal uses OpenAI's model IDs. This sample targets the Chat Completions
-wire format; it does not validate the unfinished application integration.
+wire format; it does not exercise the application HTTP endpoints.
 
 Run the existing automated provider tests separately:
 

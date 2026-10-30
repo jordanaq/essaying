@@ -1,455 +1,182 @@
-# Backend API Sketch
+# Backend API contract
 
-This document retains proposals for the Essaying API, based on
-[PROMPT.md](PROMPT.md). Context sections were reconciled with the implementation
-on 2026-10-26. Other proposed routes/types below are not evidence that an endpoint
-exists; see `backend/src/Essaying/API/V1.hs` for current routing.
+Reviewed against `backend/src/Essaying/API/V1.hs` and its request/response types
+on 2026-10-30. This file retains its original filename; the routes below describe
+the implemented API. Rename/move, revision history, streaming, and separate
+rubric-generation endpoints remain future work.
 
-The implemented context contract is described in
-[CONTEXT_DESIGN.md](CONTEXT_DESIGN.md#backend-and-ui-integration), with errors in
-[CONTEXT_ERRORS.md](CONTEXT_ERRORS.md). Ordered contributing-file output is
-stretch task L07, not an E04 requirement. Broader provider/setup documentation
-reconciliation remains E13.
+## Runtime and storage
 
-## Current provider scope and implementation direction (2026-10-27)
+`HESSAY_CACHE` selects the cache root, defaulting to `~/.cache/hessaying`.
+Account profiles are at `<cacheRoot>/users/<accountId>/profile.json`; workspaces
+are at `<cacheRoot>/users/<accountId>/workspace/`.
 
-E06 supports any provider implementing the required OpenAI-compatible API.
-Configure a provider base URL, API key, and model ID; OpenAI hosting is not
-required. Proposed backend environment names are `OPENAI_BASE_URL` and
-`OPENAI_API_KEY` (not implemented yet). Never accept provider credentials from
-essay/context content or expose them to the browser, logs, or source control.
-Select the effective context model, falling back to the account preference;
-report an actionable error if neither is set. Unsupported provider endpoints or
-capabilities must fail clearly; compatibility does not imply every provider
-supports every OpenAI API feature. The specific upstream endpoint remains a
-design choice and must match the compatibility contract we establish.
+An essay is a non-root directory containing a regular, non-symlink `essay.md`.
+The directory path is its identity, such as `History/Causes`. `essay.md` contains
+the draft; optional `prompt.md` contains the assignment; optional `context.json`
+provides the essay-local context layer. The explorer represents essays as leaves.
+Creation inside an essay is rejected. Deleting an essay removes its whole
+directory, including any extra files. Draft and assignment are independent files.
 
-Work from the Essaying API downward: route and request/response contracts,
-account-scoped handlers, backend context/model resolution, a provider interface,
-then outgoing provider HTTP calls. E06 establishes provider integration; complete-response prompt generation and
-grading behavior remain E07/E08. Streaming and user-initiated cancellation are
-post-MVP stretch L10. MVP requests use bounded non-streaming provider calls and
-return one complete JSON result or an HTTP error.
+The cache conversion is complete. There is no startup migration, legacy alias,
+or further legacy-layout validation requirement. See the
+[essay-directory contract](ESSAY_DIRECTORY_PLAN.md).
 
-### AI endpoint starting proposal (not implemented or finalized)
+## Accounts and routing
 
-Follow the current account-scoped workspace routes instead of the historical
-unscoped AI routes below. Suggested public operations are:
+All routes start with `/api/v1`. Local account selection is routing context,
+not authentication; no `X-Account-Id` header is required.
 
-- `POST /api/v1/accounts/:accountId/workspace/ai/prompt`
-- `POST /api/v1/accounts/:accountId/workspace/ai/grade`
+| Method | Route | Success |
+| --- | --- | --- |
+| GET | `/health` | 200, `HealthResponse` |
+| GET | `/ready` | 200, `ReadyResponse` |
+| GET | `/accounts` | 200, list of account profiles |
+| POST | `/accounts` | 201, created profile from `CreateAccountRequest` |
+| GET | `/accounts/:accountId` | 200, account profile |
+| PATCH | `/accounts/:accountId` | 200, profile updated with `UpdateAccountRequest` |
+| DELETE | `/accounts/:accountId` | 204 |
 
-First settle the request DTOs and complete JSON response/error contract. Requests identify
-an essay by a workspace-relative path; decide explicitly whether grading uses
-saved content or supplied editor markdown so unsaved edits have predictable
-behavior. Clients do not supply effective context, provider URLs, or credentials.
-Handlers resolve the selected account and context in the backend, choose the
-model, and retain one context snapshot per operation. Validate the complete
-provider result before returning JSON; return actionable HTTP errors for
-validation failures, provider failures, and bounded request timeouts. The UI
-shows a pending state until success or failure. Public output must not expose
-provider-private reasoning. These contracts guide E06's provider interface without requiring
-E07/E08's complete implementation in this card.
+## Workspace and essay routes
 
-### References for implementing the contracts
+Base: `/api/v1/accounts/:accountId/workspace`.
+Path components in route captures must be URL-encoded individually. Creation
+bodies use arrays of directory-name segments; context and AI bodies use
+workspace-relative strings with forward slashes.
 
-- Local route composition: `backend/src/Essaying/API/V1.hs` (`ContextApi`).
-- JSON DTOs: `backend/src/Essaying/Types/Context.hs`.
-- Handler composition and IO/errors: `backend/src/Essaying/Handler/Context.hs`.
-- Account routing: `backend/src/Essaying/Handler/Account.hs`.
-- HTTP contract tests: `backend/test/ContextErrors.hs`.
-- [Servant: A web API as a type](https://docs.servant.dev/en/latest/tutorial/ApiType.html).
-- [Servant: Serving an API](https://docs.servant.dev/en/latest/tutorial/Server.html).
-- Later, outgoing HTTP: [http-client tutorial](https://github.com/snoyberg/http-client/blob/main/TUTORIAL.md).
+| Method | Suffix | Input | Success |
+| --- | --- | --- | --- |
+| GET | (base) | None | 200, `{"tree":[...]}` |
+| POST | `/directories` | `{"parentPath":[],"directoryName":"History"}` | 201, `WorkspaceNode` |
+| DELETE | `/directories/History` | Folder path in URL | 204 |
+| POST | `/essays` | Creation body below | 201, essay content |
+| GET | `/essays/History/Causes` | Essay directory in URL | 200, essay content |
+| PUT | `/essays/History/Causes` | Exactly one of `markdown` or `prompt` | 200, reloaded essay content |
+| DELETE | `/essays/History/Causes` | Essay directory in URL | 204 |
 
-## Goals
+Tree nodes have `name`, `path` (a segment array), `nodeType`
+(`WorkspaceDirectoryNode` or `WorkspaceEssayNode`), and `children`. Essay nodes
+have no children. Their names come from their directories, independent of the
+context `title` field.
 
-- Keep the API local-first and filesystem-backed.
-- Scope all operations to a local user account.
-- Use write-through persistence for consistency.
-- Use REST/JSON for stateful operations.
-- Use complete JSON responses for MVP AI operations; SSE is post-MVP L10.
+Create an essay:
 
-## Runtime and Storage Contract
+```json
+{
+  "parentPath": ["History"],
+  "essayName": "Causes",
+  "markdown": "",
+  "prompt": "Explain the causes of the revolution."
+}
+```
 
-- Cache root resolution:
-  - Use `HESSAY_CACHE` when set.
-  - Otherwise default to `~/.cache/hessaying`.
-- Per-account root:
-  - `<cacheRoot>/users/<accountId>/workspace/...`
-- API must reject any path traversal or out-of-root path access.
+Initial `markdown` and `prompt` are optional. Omitting both creates a blank draft
+without a prompt file. Creation rejects existing destinations and cleans up a
+new directory if creation fails.
 
-## API Versioning and Base Path
+Essay content responses contain:
 
-- Base path: `/api`
-- Versioned path: `/api/v1`
-- Content types:
-  - JSON: `application/json`
-  - Post-MVP SSE stream (L10): `text/event-stream`
+```json
+{
+  "path": ["History", "Causes"],
+  "title": "Causes",
+  "markdown": "",
+  "prompt": "Explain the causes of the revolution."
+}
+```
 
-## Authentication and Account Selection
+A missing prompt loads as an empty string. An unreadable prompt is a load error.
+Save one field at a time, for example `{"markdown":"Updated draft"}` or
+`{"prompt":""}`. Omitted fields stay unchanged; empty strings persist and clear
+the selected field. Nulls, unknown keys, empty updates, and two-field updates are
+rejected. Successful responses must not replace unsaved sibling editor text.
 
-This is a local app. Implemented account-scoped routes select the account with
-`/api/v1/accounts/:accountId/workspace/...`. Context endpoints do not require
-an `X-Account-Id` header. Account selection is not authentication; session
-authentication is optional future scope.
+The handler reloads both fields after a save. The deferred L11 issue remains:
+an invalid unrelated prompt file can make that reload fail after a draft write
+has succeeded. This does not reopen migration work.
 
-Older header-based prototypes in the historical Servant sketch below describe
-an abandoned route shape and must not be used as current API examples.
-
-## Resource Model
-
-- Account: local user profile and settings.
-- Tree node: folder or essay file within account workspace.
-- Essay: markdown content plus metadata.
-- Context: effective merged context from `context.json` inheritance; source layers contain explicit operations.
-- Rubric: grading criteria and weights.
-- AI operation: prompt generation or grading, returning a complete JSON result.
-- Post-MVP AI job stream (L10): incremental output/progress and terminal events.
-
-## Proposed Endpoint List
-
-### Health and Handshake
-
-- `GET /api/v1/health`
-  - Purpose: liveness check.
-  - Response: `{ "status": "ok" }`
-
-- `GET /api/v1/ready`
-  - Purpose: backend handshake and sample effective context.
-  - Response: `{ "message": "System Ready", "sampleContext": Context }`
-
-### Accounts
-
-- `POST /api/v1/accounts`
-  - Purpose: create local account and workspace root.
-  - Body: `CreateAccountRequest`
-  - Response: `Account`
-
-- `GET /api/v1/accounts`
-  - Purpose: list local accounts.
-  - Response: `[Account]`
-
-- `GET /api/v1/accounts/:accountId`
-  - Purpose: fetch account profile.
-  - Response: `Account`
-
-- `PATCH /api/v1/accounts/:accountId`
-  - Purpose: update account preferences.
-  - Body: `UpdateAccountRequest`
-  - Response: `Account`
-
-### Workspace Tree and Context
-
-- `GET /api/v1/tree?path=<workspaceRelativePath>`
-  - Purpose: list folder contents.
-  - Response: `TreeListing`
-
-- `POST /api/v1/tree/folder`
-  - Purpose: create folder.
-  - Body: `CreateFolderRequest`
-  - Response: `TreeNode`
-
-- `POST /api/v1/tree/essay`
-  - Purpose: create markdown essay file.
-  - Body: `CreateEssayRequest`
-  - Response: `EssaySummary`
-
-- `POST /api/v1/tree/rename`
-  - Purpose: rename or move node.
-  - Body: `RenameNodeRequest`
-  - Response: `TreeNode`
-
-- `DELETE /api/v1/tree?path=<workspaceRelativePath>`
-  - Purpose: delete node.
-  - Response: `DeleteResult`
-
-### Context (implemented)
+## Context routes
 
 Base: `/api/v1/accounts/:accountId/workspace/context`.
 
 | Method | Path/input | Success |
 | --- | --- | --- |
-| GET | `?path=History/context.json` | 200, `ContextLayer` with saved operations |
-| GET | `/effective?path=History/essay.md` | 200, `EffectiveContext` with resolved values |
-| POST | JSON `{"path":"History/context.json","contextLayer":{...}}` | 201, persisted `ContextLayer` |
-| PUT | Same JSON body as POST | 200, persisted `ContextLayer` |
-| DELETE | JSON `{"path":"History/context.json"}` | 204, no body |
+| GET | `?path=History/Causes/context.json` | 200, saved `ContextLayer` operations |
+| GET | `/effective?path=History/Causes` | 200, resolved `EffectiveContext` |
+| POST | `{"path":"History/Causes/context.json","contextLayer":{...}}` | 201, persisted layer |
+| PUT | Same body as POST | 200, persisted layer |
+| DELETE | `{"path":"History/Causes/context.json"}` | 204 |
 
-No account header, absolute filesystem root, or path query is needed for
-mutations. Use an existing parent folder and workspace-relative `context.json`
-path. POST requires an absent layer (409 if present); PUT requires an existing
-layer (404 if absent) and can repair malformed stored JSON. An absent layer GET
-returns 404, while missing layers during effective resolution are skipped.
+Layer paths identify `context.json` files at the workspace root, organizational
+folders, or an essay directory. Effective-context paths identify the essay
+directory, without `/essay.md`. Resolution includes the workspace root,
+organizational ancestors, and the essay's own layer, in that order.
 
-The effective response directly contains `title`, `audience`, `model`, `tags`,
-`instructions`, `grading_directions`, and `rubric`. It has no response wrapper,
-contributing-file list, or per-field provenance. Contributing-file output is
-stretch L07; field provenance is L01. Full examples and UI limitations are in
-[the context design](CONTEXT_DESIGN.md#backend-and-ui-integration).
+Parent directories must exist. POST requires an absent layer (409 if present);
+PUT requires an existing layer (404 if absent) and can repair malformed stored
+JSON. An absent layer GET returns 404. Missing layers during effective resolution
+are skipped; invalid layers fail resolution without returning partial context.
 
-The earlier unscoped context endpoints and YAML write proposal are superseded
-by this account-scoped JSON contract. The tree/essay/AI sections elsewhere in
-this document remain proposals where they differ from current source.
+Effective responses directly contain `title`, `audience`, `model`, `tags`,
+`instructions`, `grading_directions`, and `rubric`. There is no response wrapper,
+contributing-file list, or per-field provenance. See
+[context inheritance](CONTEXT_DESIGN.md#backend-and-ui-integration) and
+[context errors](CONTEXT_ERRORS.md). Ordered contributing files remain L07 and
+field provenance remains L01.
 
-### Essays and Saving
+## AI routes
 
-- `GET /api/v1/essays?path=<workspaceRelativePath>`
-  - Purpose: load essay markdown and metadata.
-  - Response: `EssayDocument`
+Base: `/api/v1/accounts/:accountId/workspace/ai`.
 
-- `PUT /api/v1/essays?path=<workspaceRelativePath>`
-  - Purpose: write-through save essay.
-  - Body: `SaveEssayRequest`
-  - Response: `SaveEssayResponse`
+| Method | Suffix | Body | Success |
+| --- | --- | --- | --- |
+| POST | `/prompt` | `{"path":"History/Causes","instructions":"Offer two options."}` | 200, `{"prompts":["..."]}` |
+| POST | `/grade` | `{"path":"History/Causes"}` | 200, grade response below |
 
-- `GET /api/v1/essays/history?path=<workspaceRelativePath>`
-  - Purpose: list saved revisions (optional MVP+).
-  - Response: `[EssayRevision]`
+`instructions` is optional for prompt generation. Both endpoints currently
+require an existing essay directory. Prompt generation uses its effective
+context and optional extra instructions without sending the draft. It returns
+nonempty Markdown candidates and does not save `prompt.md`.
 
-### Rubrics and Grading
-
-- `GET /api/v1/rubrics/effective?path=<workspaceRelativePath>`
-  - Purpose: fetch effective rubric from context inheritance.
-  - Response: `Rubric`
-
-- `POST /api/v1/grade`
-  - Purpose: run grading for provided essay text or file path.
-  - Body: `GradeRequest`
-  - Response: `GradeResponse`
-
-### Historical AI streaming proposal (post-MVP L10)
-
-The following unscoped routes and stream types are retained for reference only.
-They are not MVP endpoints. Use the account-scoped complete-response proposal
-above for current work; any later streaming routes require a separate contract.
-
-- `POST /api/v1/ai/prompt/stream`
-  - Purpose: stream prompt generation tokens/events.
-  - Body: `PromptStreamRequest`
-  - Response: SSE `AiStreamEvent`
-
-- `POST /api/v1/ai/draft/stream`
-  - Purpose: stream drafting assistance.
-  - Body: `DraftStreamRequest`
-  - Response: SSE `AiStreamEvent`
-
-- `POST /api/v1/ai/grade/stream`
-  - Purpose: stream grading progress and final score/feedback payload; do not expose provider-private reasoning.
-  - Body: `GradeStreamRequest`
-  - Response: SSE `AiStreamEvent`
-
-## Data Types (Sketch)
-
-```haskell
-newtype AccountId = AccountId Text
-newtype WorkspacePath = WorkspacePath Text  -- normalized, relative, no ".."
-
-data Account = Account
-  { accountId :: AccountId
-  , displayName :: Text
-  , createdAt :: UTCTime
-  , preferredModel :: Maybe Text
-  }
-
-data TreeNodeType = FolderNode | EssayNode
-
-data TreeNode = TreeNode
-  { path :: WorkspacePath
-  , name :: Text
-  , nodeType :: TreeNodeType
-  }
-
-data TreeListing = TreeListing
-  { parent :: WorkspacePath
-  , nodes :: [TreeNode]
-  }
-
-data EssayDocument = EssayDocument
-  { path :: WorkspacePath
-  , markdown :: Text
-  , updatedAt :: UTCTime
-  }
-
-data SaveEssayRequest = SaveEssayRequest
-  { markdown :: Text
-  , expectedVersion :: Maybe Int
-  }
-
-data SaveEssayResponse = SaveEssayResponse
-  { path :: WorkspacePath
-  , version :: Int
-  , updatedAt :: UTCTime
-  }
-
--- Historical name for resolved values; current code uses EffectiveContext.
--- Writes use ContextLayer operations, not this resolved record.
-data Context = Context
-  { title :: Maybe Text
-  , audience :: Maybe Text
-  , model :: Maybe Text
-  , tags :: [Text]
-  , instructions :: [Text]
-  , grading_directions :: [Text]
-  , rubric :: Map Text RubricCriterion
-  }
-
-data RubricCriterion = RubricCriterion
-  { weight :: Double
-  , description :: Maybe Text
-  }
-
-data Rubric = Rubric
-  { criteria :: Map Text RubricCriterion
-  }
-
-data GradeRequest = GradeRequest
-  { path :: Maybe WorkspacePath
-  , markdown :: Maybe Text
-  , modelOverride :: Maybe Text
-  }
-
-data GradeResponse = GradeResponse
-  { overallScore :: Double
-  , criteriaScores :: Map Text Double
-  , feedback :: Text
-  }
-
--- Historical post-MVP L10 event sketch, not an MVP response type.
-data AiStreamEvent
-  = AiStarted { requestId :: Text, model :: Text }
-  | AiToken { chunk :: Text }
-  | AiProgress { percent :: Maybe Int, stage :: Text }
-  | AiResult { payload :: Value }
-  | AiError { code :: Text, message :: Text }
-  | AiDone
-```
-
-## Servant Type Signatures (Sketch)
-
-Implemented context routes, nested under
-`"accounts" :> Capture "accountId" Text :> "workspace" :> "context"`:
-
-```haskell
-type ContextApi =
-       "effective" :> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] EffectiveContext
-  :<|> QueryParam' '[Required, Strict] "path" FilePath :> Get '[JSON] ContextLayer
-  :<|> ReqBody '[JSON] ContextWriteRequest :> PostCreated '[JSON] ContextLayer
-  :<|> ReqBody '[JSON] ContextWriteRequest :> Put '[JSON] ContextLayer
-  :<|> ReqBody '[JSON] DeleteContextRequest :> DeleteNoContent
-```
-
-`ContextWriteRequest` preserves the JSON `path`/`contextLayer` envelope, with a
-raw layer value validated in the handler. Invalid submitted layers therefore
-return 422 instead of a request-decoding 400.
-
-The following is a historical prototype for other proposed resources. Its
-account-header routing and several types differ from the implementation.
-Context routes have been removed from it to avoid conflicting examples. Its
-streaming AI declarations are post-MVP L10 references, not current MVP contracts.
-
-
-```haskell
-type AccountHeader = Header' '[Required, Strict] "X-Account-Id" Text
-
-type ApiV1 =
-       "api" :> "v1" :>
-         (    "health" :> Get '[JSON] HealthResponse
-         :<|> "ready"  :> Get '[JSON] ReadyResponse
-
-         :<|> AccountHeader :> "accounts" :> ReqBody '[JSON] CreateAccountRequest :> PostCreated '[JSON] Account
-         :<|> AccountHeader :> "accounts" :> Get '[JSON] [Account]
-         :<|> AccountHeader :> "accounts" :> Capture "accountId" Text :> Get '[JSON] Account
-         :<|> AccountHeader :> "accounts" :> Capture "accountId" Text :> ReqBody '[JSON] UpdateAccountRequest :> Patch '[JSON] Account
-
-         :<|> AccountHeader :> "tree" :> QueryParam' '[Required, Strict] "path" Text :> Get '[JSON] TreeListing
-         :<|> AccountHeader :> "tree" :> "folder" :> ReqBody '[JSON] CreateFolderRequest :> PostCreated '[JSON] TreeNode
-         :<|> AccountHeader :> "tree" :> "essay"  :> ReqBody '[JSON] CreateEssayRequest  :> PostCreated '[JSON] EssaySummary
-         :<|> AccountHeader :> "tree" :> "rename" :> ReqBody '[JSON] RenameNodeRequest  :> Post '[JSON] TreeNode
-         :<|> AccountHeader :> "tree" :> QueryParam' '[Required, Strict] "path" Text :> DeleteNoContent
-
-
-         :<|> AccountHeader :> "essays" :> QueryParam' '[Required, Strict] "path" Text :> Get '[JSON] EssayDocument
-         :<|> AccountHeader :> "essays" :> QueryParam' '[Required, Strict] "path" Text :> ReqBody '[JSON] SaveEssayRequest :> Put '[JSON] SaveEssayResponse
-
-         :<|> AccountHeader :> "rubrics" :> "effective" :> QueryParam' '[Required, Strict] "path" Text :> Get '[JSON] Rubric
-         :<|> AccountHeader :> "grade" :> ReqBody '[JSON] GradeRequest :> Post '[JSON] GradeResponse
-
-         :<|> AccountHeader :> "ai" :> "prompt" :> "stream" :> ReqBody '[JSON] PromptStreamRequest :> StreamGet NewlineFraming EventStream AiStreamEvent
-         :<|> AccountHeader :> "ai" :> "draft"  :> "stream" :> ReqBody '[JSON] DraftStreamRequest  :> StreamGet NewlineFraming EventStream AiStreamEvent
-         :<|> AccountHeader :> "ai" :> "grade"  :> "stream" :> ReqBody '[JSON] GradeStreamRequest  :> StreamGet NewlineFraming EventStream AiStreamEvent
-         )
-```
-
-## What Should Be Exposed
-
-Expose publicly under `/api/v1`:
-
-- Health/ready endpoints.
-- Account profile and preferences.
-- Workspace tree operations.
-- Context and rubric read/write APIs.
-- Essay load/save APIs.
-- MVP account-scoped prompt and grade endpoints returning complete JSON.
-- Streaming endpoints only in post-MVP L10; drafting remains optional L04.
-
-Keep internal (not exposed):
-
-- Direct filesystem absolute paths.
-- Raw provider request internals and provider-specific chain-of-thought fields.
-- Internal lock, cache, and merge-debug structures.
-- Unnormalized path operations.
-
-## Error Model
-
-Context endpoints implement the envelope, status/code mappings, redaction, and
-field diagnostics in [CONTEXT_ERRORS.md](CONTEXT_ERRORS.md). Invalid request
-envelopes return 400; invalid stored/submitted context returns 422. That document
-also records pending UI detail rendering and AI gating.
-
-The generic envelope/status suggestions below are historical proposals for
-other resources, not a description of current context responses:
+Grading loads the saved draft and optional saved assignment as distinct inputs,
+resolves context, and requires a nonblank draft and a finite, positive total
+rubric weight before calling the provider. Missing/empty assignments are allowed.
+It validates exact criterion names, finite scores from 0 to 100, and nonblank
+feedback. The application calculates normalized weights and the overall score:
 
 ```json
 {
-  "error": {
-    "code": "PATH_OUTSIDE_WORKSPACE",
-    "message": "Requested path escapes account workspace root.",
-    "details": null
+  "overallScore": 80,
+  "feedback": "A clear argument with room for stronger support.",
+  "criteria": {
+    "evidence": {
+      "score": 80,
+      "feedback": "Support the central claim with a specific example.",
+      "normalizedWeight": 1
+    }
   }
 }
 ```
 
-Suggested status usage:
+AI operations resolve one context snapshot per request and never persist their
+results. Browser edits must be saved to become grading inputs. Clients do not
+supply effective context, provider URLs, or credentials.
 
-- `400` invalid request shape/path.
-- `401` missing account header/session.
-- `403` cross-account access attempt.
-- `404` resource not found.
-- `409` optimistic write version conflict.
-- `422` invalid markdown/context payload.
-- `500` internal error.
-- `502` upstream provider unavailable/error (proposed mapping).
+### Provider configuration and failures
 
-## Implementation Notes
+Set `OPENAI_BASE_URL` and `OPENAI_API_KEY` in the backend environment. The adapter
+appends `/chat/completions` to the API base URL and uses Bearer authentication,
+non-streaming Chat Completions, and strict JSON-schema output. Select the model
+in effective context or, as fallback, account preferences. Providers and models
+must support the required endpoint and schema capability.
 
-- Preserve existing endpoint behavior by keeping `GET /api/ready` as temporary alias while moving to `/api/v1/ready`.
-- Normalize `WorkspacePath` once at request boundary.
-- Ensure all file operations are rooted under `<cacheRoot>/users/<accountId>/workspace`.
-- Add request IDs for AI calls for diagnostics without logging credentials.
+Calls are bounded and return a complete validated JSON result or an error.
+Provider failures use application-owned corrective messages without raw provider
+diagnostics or credentials. Missing model/invalid grading inputs return 422;
+configuration errors return 500; upstream/invalid-response failures generally
+return 502; timeouts return 504. Context errors retain their documented JSON
+envelope; other handlers do not uniformly use that envelope.
 
-## MVP Cut (Historical Original Proposal)
-
-This original cut includes streaming, which is now post-MVP L10. The current
-MVP uses account-scoped prompt/grading endpoints returning complete JSON, as
-described above; this list is not the current release checklist.
-
-- `GET /api/v1/ready`
-- `POST /api/v1/accounts`
-- `GET /api/v1/tree`
-- `GET /api/v1/accounts/:accountId/workspace/context/effective?path=<essayPath>`
-- `GET /api/v1/essays`
-- `PUT /api/v1/essays`
-- `POST /api/v1/ai/grade/stream`
-
-This set supports account bootstrap, tree browsing, context-aware loading, write-through editing, and streamed grading.
+The frontend still uses mock grading. Prompt-generation/adoption and real
+grading/results integration remain E07–E09. Streaming and user cancellation are
+post-MVP L10; explorer generation from a folder still needs its workflow defined.

@@ -1,20 +1,21 @@
 # Context inheritance design
 
-Status: JSON inheritance and account-scoped context APIs implemented; reviewed
-2026-10-26. Grading/provider behavior and the remaining UI requirements below
-are planned. Contributing-file output is optional stretch scope (L07).
+Status: JSON inheritance, essay-directory storage, account-scoped context APIs,
+and backend provider enforcement implemented; reviewed 2026-10-30. Real frontend
+AI workflows remain E07–E09. Contributing-file output is stretch scope (L07).
 
 ## Purpose and scope
 
 An essay's effective context is assembled from `context.json` files in its
-ancestor directories, starting at its account workspace root and ending in its
-containing directory. Inner directories can override inherited settings or add
+ancestor directories, starting at its account workspace root and ending in the
+essay directory itself. Inner directories can override inherited settings or add
 to them, according to each field's merge rule. The effective context supplies
 settings and guidance for LLM operations.
 
 Agreed behavior:
 
-- Only directories provide context. Essay-specific overrides are out of scope.
+- Directory layers provide context, including essay-specific overrides in the
+  essay directory’s own `context.json`.
 - Appendable fields have an explicit way to replace or clear inherited values.
 - Rubrics merge criteria by name and can also be replaced as a whole.
 - Context is computed when needed. No generated JSON file is written to disk.
@@ -23,11 +24,13 @@ Agreed behavior:
 
 ## Resolution
 
-For an essay at `History/French-Revolution/causes.md`, resolve these files in order:
+For the essay `History/French-Revolution/Causes`, whose draft is stored at
+`History/French-Revolution/Causes/essay.md`, resolve these files in order:
 
 1. `<workspace>/context.json`
 2. `<workspace>/History/context.json`
 3. `<workspace>/History/French-Revolution/context.json`
+4. `<workspace>/History/French-Revolution/Causes/context.json`
 
 A missing file contributes nothing. Never consult directories above the account
 workspace, sibling directories, or the essay's contents. An empty JSON object (`{}`) is treated as an empty configuration. An empty file
@@ -182,8 +185,9 @@ Individual criterion deletion is out of scope; use replacement.
 
 Weights are relative and need not sum to one. At grading time, normalize by the
 sum of effective weights. Rubric-based grading requires at least one criterion
-with positive weight. An empty or all-zero rubric can be inspected and used for
-non-grading operations, but blocks rubric-based grading.
+with positive weight and a finite, positive total weight. An empty, all-zero,
+or overflowing total blocks grading before a provider call. Such context can
+still be inspected and used for non-grading operations.
 
 ## Worked example
 
@@ -289,8 +293,9 @@ Workspace root (`context.json`):
 }
 ```
 
-Any essay directly in that final directory receives the following effective
-values, illustrated as JSON but held in memory:
+An essay directory under `History/French-Revolution`, with no local context
+overrides, receives the following effective values, illustrated as JSON but
+held in memory:
 
 ```json
 {
@@ -355,8 +360,8 @@ line/column coordinates are not currently emitted. For example:
 The UI currently displays error messages; file/field details are available in
 the HTTP response but are not rendered by the panel (post-MVP L09). The mock
 grading button requires a successful context resolution for the current account
-and essay; loading and errors disable it. Future provider handlers
-must independently validate context before calling a provider (E06/E08).
+and essay; loading and errors disable it. Backend prompt and grading handlers
+independently resolve and validate context before calling a provider.
 Writing, loading, and saving essays do not depend on context resolution.
 See [Context error handling](CONTEXT_ERRORS.md) for the implemented error contract.
 
@@ -365,9 +370,10 @@ See [Context error handling](CONTEXT_ERRORS.md) for the implemented error contra
 Provider scope (clarified 2026-10-27): support any provider implementing the
 required OpenAI-compatible API, using a configurable provider base URL and API
 key. OpenAI hosting is not required. Provider connection settings belong to the
-backend environment, not inherited context or browser requests. Proposed names
-are `OPENAI_BASE_URL` and `OPENAI_API_KEY`; these are planned E06 settings, not
-implemented configuration. Model IDs are interpreted by the configured provider.
+backend environment, not inherited context or browser requests. Implemented
+settings are `OPENAI_BASE_URL` and `OPENAI_API_KEY`. The provider must support
+Chat Completions and strict JSON-schema output. Model IDs are interpreted by
+the configured provider.
 Compatibility is operation-specific: unsupported endpoints or capabilities must
 produce actionable errors rather than assuming all providers support the same
 API features. Send essay text and relevant context only when an AI action is
@@ -394,7 +400,7 @@ that account's workspace, and should be URL-encoded in query parameters.
 | Method and suffix | Input | Success |
 | --- | --- | --- |
 | GET `?path=History/context.json` | Existing folder's layer path | 200, a `ContextLayer` containing saved operations |
-| GET `/effective?path=History/essay.md` | Existing markdown essay path | 200, an `EffectiveContext` containing resolved values |
+| GET `/effective?path=History/Causes` | Existing essay directory path | 200, an `EffectiveContext` containing resolved values |
 | POST | JSON `{"path":"History/context.json","contextLayer":{...}}` | 201, the persisted `ContextLayer` |
 | PUT | Same body as POST | 200, the persisted `ContextLayer` |
 | DELETE | JSON `{"path":"History/context.json"}` | 204, no response body |
@@ -442,7 +448,7 @@ provenance. Ordered contributing-file output and its tests are stretch task L07,
 deferred by user decision on 2026-10-26; per-field provenance remains optional
 under L01. Neither is required for E04.
 
-The Context tab already provides folder-layer editing, ancestor scope selection,
+The Context tab provides essay-local and folder-layer editing, ancestor scope selection,
 inherited list previews, create/update/delete, and an effective essay preview.
 The preview loads on essay selection and refreshes after context mutations.
 `Reload` reloads the layer and inherited lists; `Retry preview` retries a failed
@@ -454,9 +460,11 @@ editing/saving usable; retry after repair restores grading eligibility. Error
 messages are displayed, but file/field display (L09) and in-app repair of malformed
 layers (L08) remain post-MVP.
 
-Each future LLM request must resolve context again and hold one snapshot for
-that operation, independently of any frontend preview. Provider calls are not
-implemented yet.
+Each backend LLM request resolves context again and holds one snapshot for
+that operation, independently of any frontend preview. Prompt generation sends
+context and optional generation instructions. Grading sends the saved draft,
+saved assignment when present, and context as distinct inputs. Neither endpoint
+persists its result. Unsaved editor changes are not inputs to these endpoints.
 
 ## Implementation status
 
@@ -470,14 +478,17 @@ Sample YAML and shorthand layers have been migrated to operation-based JSON.
 The resolver does not support those older source formats. Missing layer fields
 decode to `Nothing`; resolved collection defaults are assigned by the resolver.
 
-Pending: E05 UI refresh/gating behavior and E06/E08 provider enforcement and
-grading validation/normalization. Contributing paths are stretch scope L07;
-caching/file watching and per-field provenance remain optional.
+Also implemented: UI preview refresh/gating, essay-local context editing,
+independent draft/assignment saves, unsaved-edit protection, backend provider
+context validation, finite-positive rubric-total validation before network
+access, and grading normalization. Real frontend prompt and grading workflows
+remain E07–E09. Contributing paths are stretch scope L07; caching/file watching
+and per-field provenance remain optional.
 
 ## Acceptance checks
 
-These include implemented resolver checks and planned provider/UI requirements;
-provider-related checks are not claims of completed functionality.
+These describe the implemented resolver and backend provider contract.
+Integrated frontend AI workflow acceptance remains E07–E09.
 
 - Root-only, nested, missing-file, and empty-object cases resolve predictably.
 - Nearest scalar operations win; omission and top-level field null inherit;

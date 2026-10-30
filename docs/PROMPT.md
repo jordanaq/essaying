@@ -25,6 +25,19 @@ complete JSON result or an actionable HTTP error. The UI shows pending,
 success, and failure states while editing remains usable. The streaming/SSE
 requirements in the historical research below do not apply to the MVP.
 
+## Current essay storage (2026-10-30)
+
+The essay-directory migration is complete and the existing cache is converted.
+An essay is identified by its workspace-relative directory, such as
+`History/Causes`, with a required `essay.md` draft, optional `prompt.md`
+assignment, and optional essay-local `context.json`. Context inheritance includes
+that local layer. Essays appear as explorer leaves; draft and assignment save
+independently, and essay deletion removes the whole directory. Older file-based
+essay descriptions below are historical. The current contracts are in
+[ESSAY_DIRECTORY_PLAN.md](ESSAY_DIRECTORY_PLAN.md) and
+[BACKEND_API_SKETCH.md](BACKEND_API_SKETCH.md). No further legacy-layout checks
+or migration tooling are required.
+
 ## Original Query
 
 ### Role

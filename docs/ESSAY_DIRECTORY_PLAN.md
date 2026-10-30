@@ -1,11 +1,10 @@
-# Essay directory migration plan
+# Essay directory storage and completed migration
 
-Status: agreed storage direction; implementation planned, not started.
-Date: 2026-10-27 (America/New_York).
-
-This plan changes the workspace model before prompt generation and grading.
-Backend implementation and migration tooling remain user-owned under AGENTS.md;
-this document does not authorize their implementation or conversion of user data.
+Status: M01–M04 complete under the revised migration scope, 2026-10-30.
+The filename is retained for existing links; this document describes the current
+storage contract. The existing cache is converted. No reusable converter,
+legacy-layout scan, restart gate, or backup/restore rehearsal is required to
+close this migration.
 
 ## Storage contract
 
@@ -20,20 +19,20 @@ History/
 
 - A non-root directory containing a regular, non-symlink `essay.md` is an essay.
   An empty `essay.md` is valid. The account workspace root is always a container;
-  a legacy root-level `essay.md` must be handled by migration before cutover.
+  root-level essay operations are rejected.
 - The directory name supplies the title in the explorer. It is the canonical
   identity, represented by workspace-relative directory path segments, e.g.
   `["History", "My Essay"]`. Internal filenames are not part of that identity.
 - Essays appear as leaf nodes. Discovery does not descend into them. Creating
   folders or essays inside an essay is rejected, including through direct API
-  requests. Unexpected existing child files/directories are preserved; nested
-  essay markers are reported during migration/preflight rather than hidden.
+  requests. Unexpected existing child files/directories are preserved; loading,
+  saving, creating, and deleting nested essay targets are rejected.
 - `essay.md` contains only the draft. `prompt.md` contains only the assignment.
   Missing and empty prompts both mean no assignment for AI purposes. Prompt text
   is local to the essay and does not inherit from parent directories.
-- `context.json` retains its current schema and merge rules. No `prompt` field is
-  added. Resolve root context, enclosing folder layers, then the essay's own
-  context layer. A missing layer contributes nothing; invalid context continues
+- `context.json` retains its current schema and merge rules. The assignment is
+  stored separately from context. Resolve root context, enclosing folder layers,
+  then the essay's own context layer. A missing layer contributes nothing; invalid context continues
   to block AI actions while draft and prompt editing/saving remain available.
 - The directory name supplies the explorer title even when effective context has
   a different `title`; that inherited field remains descriptive AI context.
@@ -43,14 +42,15 @@ History/
 - Essay deletion removes the whole essay directory, including extra files. The
   UI explicitly describes that scope. Folder deletion rejects an essay target.
   Rename/move, when implemented under L02, must operate on the whole directory.
-- Loose Markdown outside essay directories is not an essay after cutover. Report
-  unmigrated candidates rather than silently claiming migration succeeded.
+- Loose Markdown outside essay directories is not an essay and is omitted from
+  discovery. The existing cache conversion is complete; no further legacy scan
+  or conversion step is required.
 
-## Proposed API contract
+## Implemented API contract
 
-Keep the existing account-scoped `/workspace/essays` route family, but change
-essay path semantics to the directory identity. Coordinate backend and frontend
-cutover; old `.md` path aliases and permanent dual-format support are out of scope.
+The account-scoped `/workspace/essays` route family uses directory identities
+in both backend and frontend. Old `.md` path aliases and dual-format support
+are not implemented. See [the API reference](BACKEND_API_SKETCH.md) for route examples.
 
 - Tree nodes retain `WorkspaceEssayNode`, use the directory name and directory
   path, and have no children. Organizational folders retain their current type.
@@ -60,133 +60,54 @@ cutover; old `.md` path aliases and permanent dual-format support are out of sco
 - Essay PUT accepts independently optional `markdown` and `prompt` strings.
   An omitted field is unchanged, an empty string is saved, and null/unknown
   fields and empty update objects are rejected. The UI saves one field per
-  request; initially reject requests containing both fields so there is no
+  request; requests containing both fields are rejected, so there is no
   implied atomic two-file save. Return the updated essay representation.
 - Essay POST keeps `parentPath`, `essayName`, and optional initial `markdown`,
-  and adds optional initial `prompt`. Absence produces an empty draft and no
+  and accepts optional initial `prompt`. Absence produces an empty draft and no
   prompt file. Creation must not overwrite any existing file or directory at
   the destination. A failed create must not expose a partial essay.
-- Essay DELETE targets the directory identity. All operations validate the
-  selected account, path, ancestor types, and symlinks, including internal files.
+- Essay DELETE targets the directory identity. Workspace target checks reject
+  unsafe paths, nesting, and symlinks; broader boundary hardening remains E11.
 - Effective-context GET and AI request `path` values use the same directory
   identity. Context layer CRUD continues to use explicit `context.json` paths.
-- AI operations load the saved draft, saved prompt, and resolved context on the
-  backend. Keep these inputs separate. E07 generation returns a candidate;
-  “Use this prompt” puts it into the editable prompt field, and saving persists
-  it. E08 grading uses the saved assignment when present; without an assignment,
-  grading remains available using context/rubric and makes that state clear.
+- Backend grading loads the saved draft, saved assignment, and resolved context
+  as separate inputs. Without an assignment it grades using context and rubric.
+  Prompt generation uses context and optional instructions without loading the
+  draft, returning candidates without saving them. E07 will add frontend
+  candidate adoption into the assignment editor and normal prompt saving.
 - Draft and prompt have separate dirty/saving/error state. Successful draft
   saves must not replace unsaved prompt text from the response, or vice versa.
-  AI actions require relevant pending edits to be saved or explicitly discarded.
+  Real frontend AI integration must require relevant pending edits to be saved
+  or explicitly discarded.
 
-## Implementation sequence and cards
+## Completion record
 
-### M01 — Adopt essay directories in backend storage and API
+- M01: backend storage/API uses essay directories, independent draft/assignment
+  saves, essay-local context, validated targets, and failed-creation cleanup.
+- M02: user revised scope to direct conversion instead of a reusable tool.
+  Conversion completed 2026-10-29 with a verified backup and manifest. The
+  2026-10-30 read-only audit found all eight mapped files still matched their
+  original hashes.
+- M03: explorer and editors use directory identities, independent save/discard
+  state, stale-response protection, and unsaved-edit navigation/reload guards.
+- M04: documentation reconciled with the implemented format. On 2026-10-30 the
+  user removed further legacy-layout, restart, and restore checks from migration
+  acceptance because the cache was already updated. No new migration tooling or
+  user-data conversion is pending.
 
-User-owned backend work; use the contract above as the review target.
+Recorded implementation verification passed 232 regular backend cases, 16
+frontend component cases, a typechecked frontend build, and 35 browser scenarios.
+These are prior passing runs, not new tests performed for this documentation
+update. Existing provider samples and recorded-response fixtures already use
+`essay.md` markers and separate assignments where relevant.
 
-Touch points: `Types/Workspace.hs`, `Persistence/Workspace.hs`,
-`Handler/Workspace.hs`, `API/V1.hs`, `Persistence/Context.hs`, context path error
-messages, and AI path types/contracts. Keep context merge logic unchanged.
+## Remaining feature work
 
-Acceptance:
+E07 adds frontend prompt generation, candidate selection, and adoption into the
+assignment editor; E08/E09 retain integrated grading/results acceptance. The
+backend already loads saved draft/assignment/context separately. E10 retains
+broader editor polish, E11 broader filesystem hardening, E12 full-app workflow
+checks, and E13 broader setup/documentation review. These do not reopen migration.
 
-- Discover essay directories as leaves; distinguish folders consistently across
-  list/create/load/save/delete. Reject nesting and root essay operations.
-- Create/read/update draft and prompt independently; empty text survives reload.
-- Root-to-essay context includes the local essay layer and retains strict errors.
-- Broken context does not prevent draft/prompt persistence.
-- Verify collisions, unsafe paths, symlink ancestors/internal files, wrong target
-  types, missing/unreadable files, failed writes, and cross-account isolation.
-- Focused persistence and HTTP regression tests pass; backend build passes.
-
-### M02 — Add an explicit legacy migration tool
-
-Depends on M01; user-owned backend/tooling work. No automatic startup migration.
-
-For each confirmed legacy essay `History/My Essay.md`, propose
-`History/My Essay/essay.md`. Do not extract a prompt from draft contents, create
-an empty local context layer, or change enclosing context files. The new missing
-local layer preserves the old effective context.
-
-Acceptance:
-
-1. Read-only dry run enumerates selected account roots and source/destination
-   mappings. Let the operator exclude Markdown documents that are not essays.
-2. Preflight the whole selected set before mutation: destination collisions,
-   symlinks, unreadable sources, names/paths, nested markers, and ambiguous
-   directories already containing `essay.md`. A folder with `essay.md` may be a
-   legacy folder containing an essay named `essay`; require explicit resolution
-   rather than assuming it is already migrated.
-3. Require the app to be stopped and take a verified backup outside workspaces
-   before applying. Never overwrite or merge into an existing destination.
-4. Prepare each destination outside the visible workspace, preserving source
-   bytes; verify the copy before publication. Use no-clobber operations. Record
-   per-item progress in a migration manifest outside the workspace and retain
-   originals until their published copies are verified. Define interruption
-   recovery before implementing the tool; migration is not an all-account
-   atomic transaction.
-5. An interrupted/repeated run uses the manifest to distinguish completed,
-   pending, and conflicting items, verifies files, and never guesses or deletes
-   conflicting content. Provide explicit recovery and backup-restore instructions.
-6. Verify draft bytes, essay counts, old-to-new identities, and unchanged
-   effective context for every migrated essay. Start the new app only after
-   unresolved collisions/ambiguities are cleared. Preserve a mapping for resetting
-   any saved client selections that refer to old `.md` paths.
-
-Migration tests use isolated temporary workspaces: empty/Unicode drafts,
-multi-account/nested folders, filename `essay.md`, existing destinations,
-already-converted directories, symlinks, permission/write failures, interruption,
-and repeated runs. No live user data is converted as part of implementation tests.
-
-### M03 — Switch explorer and editors to directory identities
-
-Depends on M01's agreed contract. Frontend can be developed against mocks before
-backend completion; integrated acceptance follows M01.
-
-Touch points: `App.svelte`, `WorkspaceTree.svelte`, `ContextPanel.svelte`,
-`context-preview.ts`, component fixtures, and browser scenarios.
-
-Acceptance:
-
-- Explorer shows `My Essay` as an essay leaf; internal files do not appear.
-  Creation uses folder names without appending `.md`, and essays cannot be used
-  as parents. Delete confirmation explains whole-directory deletion.
-- Selection, load/save/delete, and context preview use directory identities.
-  Context scope choices include the selected essay directory itself.
-- Provide an assignment prompt editor with independent save/error/dirty states.
-  Preserve sibling unsaved edits during any save and prevent stale account or
-  essay responses from replacing current drafts/prompts.
-- Protect prompt, draft, and context edits on navigation/account change/reload.
-  Move this prerequisite portion of E10 forward; E10 retains broader polish.
-- Verify absent/empty prompts, empty drafts, context errors, reload persistence,
-  switching accounts/essays, failed saves, and desktop/mobile usability.
-- Frontend component tests, typechecked build, and relevant browser tests pass.
-
-### M04 — Validate cutover and reconcile documentation
-
-Depends on M01–M03. In an isolated cache, dry-run/apply the migration, launch the
-new app, and verify discovery, draft/prompt saves, essay-local rubric inheritance,
-restart persistence, account isolation, deletion scope, and failure recovery.
-Record evidence and a manual backup/restore rehearsal. Update sample files and
-their fixture expectations, README, context design, context error docs, and API
-sketch to describe the implemented format; label this document planned until then.
-
-Backend tests/build, frontend tests/build, relevant live-API browser scenarios,
-and `git diff --check` must pass. Existing passing evidence for the old layout is
-historical and does not satisfy this gate. Actual user-data conversion is a
-separate explicit action after review of the dry-run report and backup.
-
-## Relationship to existing work
-
-- M01–M04 precede the integrated E07/E08 workflows. E06 provider plumbing can
-  proceed independently once it uses the agreed directory identity contract.
-- E07 includes candidate adoption and prompt persistence through normal saving.
-- E08 uses the saved prompt alongside effective context and draft; E09 presents
-  those results without overwriting either saved file.
-- E10 retains UI polish and navigation protection not already covered by M03;
-  E11 still covers broader filesystem hardening. M01/M02 safety is required now.
-- E12 adds migration/restart and saved-prompt grading to full workflow checks.
-- Shared/reusable prompts, attachments UI, nested essays, optimistic concurrency,
-  and rename/move implementation remain later scope. Extra files are preserved
-  by ordinary draft/prompt saves and travel with directory operations.
+Rename/move, attachments, reusable prompts, optimistic concurrency, and streaming
+remain later scope. The deferred save/reload acknowledgment issue stays L11.

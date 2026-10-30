@@ -1,6 +1,6 @@
 # Context error handling
 
-Status: implemented backend contract, reviewed 2026-10-26. This describes handled
+Status: implemented backend contract, reviewed 2026-10-30. This describes handled
 context API errors and Servant JSON/query decoding failures. It does not promise
 this envelope for unrelated routes or framework errors such as unsupported media
 types. See [CONTEXT_DESIGN.md](CONTEXT_DESIGN.md#backend-and-ui-integration) for
@@ -39,7 +39,7 @@ are not currently emitted.
 | 400 | `INVALID_REQUEST` | Malformed request JSON, missing required query/body members, or invalid envelope. “Provide a valid request with the required path and context layer.” |
 | 400 | `INVALID_ACCOUNT_ID` | Unsafe account ID. “Select a valid account.” |
 | 400 | `INVALID_CONTEXT_PATH` | Unsafe path, wrong target filename, or missing parent directory for a layer operation. “Use an existing directory and a workspace-relative context.json path.” |
-| 400 | `INVALID_ESSAY_PATH` | Unsafe or non-markdown effective-context target. “Use a workspace-relative markdown essay path.” |
+| 400 | `INVALID_ESSAY_PATH` | Unsafe effective-context target, including the workspace root or a nested essay. The current message still says “Use a workspace-relative markdown essay path.”; supply an essay directory such as `History/Causes`, without `/essay.md`. |
 | 403 | `CONTEXT_SYMBOLIC_LINK` | A checked essay/context path component or workspace root is a symlink. “Context paths must not pass through symbolic links.” |
 | 404 | `ACCOUNT_NOT_FOUND` | Missing or invalid selected account profile. “Select an existing account.” |
 | 404 | `ESSAY_NOT_FOUND` | No existing essay at a valid path. “Essay does not exist.” |
@@ -64,7 +64,7 @@ Mutations acknowledge success only after persistence succeeds.
 
 Missing layers during effective resolution are skipped. If all are absent,
 resolution succeeds with defaults. Existing invalid or unreadable layers are
-errors. Resolution checks layers from root to essay parent and stops at the first
+errors. Resolution checks layers from root through the essay directory and stops at the first
 broken one, even if a child would replace its values. No partial effective
 context is returned.
 
@@ -99,9 +99,10 @@ Selection changes invalidate eligibility and late responses are ignored.
 Collapsing the Context panel preserves resolution state. Rendering file/field
 details (L09) and in-app malformed-layer repair (L08) remain post-MVP.
 
-Essay loading/editing/saving remain independent of context resolution. Future
-provider handlers must independently resolve and validate context before calls;
-that enforcement belongs to E06/E08. There are no provider calls yet.
+Draft and assignment loading/editing/saving remain independent of context
+resolution. Backend prompt and grading handlers independently resolve and
+validate context before provider calls. The frontend Grade action still uses
+mock feedback; real frontend AI integration remains E07–E09.
 
 Ordered contributing-file output and its tests are deferred to stretch task L07;
 they are not required to finish E04. Per-field provenance remains L01.
@@ -115,7 +116,8 @@ paths, missing resources, absent layers, malformed/duplicate/trailing documents,
 symlink/I/O redaction, create collisions, malformed-layer repair, and successful
 essay saving with a broken ancestor.
 
-The recorded implementation run passed all 64 backend HUnit cases, the backend
-executable build, and all four Chromium browser scenarios. The implementation
-is committed in `3194ad2`. This documentation update does not rerun application
-tests or claim complete E11 hardening or E05 UI behavior.
+Historical context implementation verification passed 64 backend cases and
+four browser scenarios (`3194ad2`). Subsequent recorded verification passed
+232 regular backend cases, 16 frontend component cases, a typechecked frontend
+build, and 35 browser scenarios. These are prior passing runs; this documentation
+update does not rerun application tests or claim complete E11 hardening.
