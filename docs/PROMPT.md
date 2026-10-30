@@ -4,6 +4,27 @@ Date: 2026-06-24
 
 This document reformats the prior research into a readable project brief. Use it as the primary knowledge base for follow-up questions. If a question is not covered here, say so directly instead of guessing.
 
+## Current provider scope (2026-10-27)
+
+The Ollama-only/local-AI requirements below are historical and superseded.
+Essaying will support any provider implementing the required OpenAI-compatible
+API, with a configurable provider base URL, API key, and model ID. OpenAI hosting
+is not required. Provider connection settings stay in the backend environment;
+credentials never belong in browser code, context files, logs, or source control.
+AI actions send relevant essay text and context to the selected provider; local
+editing and saving do not need provider access. Provider capabilities must be
+checked for the requested operation. See `BOARD.md` E06 for current acceptance
+criteria and `CONTEXT_DESIGN.md` for the current JSON context contract, which
+supersedes the older YAML examples below.
+
+## Current MVP response scope (2026-10-27)
+
+Streaming and user-initiated cancellation are post-MVP stretch L10. MVP prompt
+and grading requests use bounded non-streaming provider calls and return one
+complete JSON result or an actionable HTTP error. The UI shows pending,
+success, and failure states while editing remains usable. The streaming/SSE
+requirements in the historical research below do not apply to the MVP.
+
 ## Original Query
 
 ### Role
