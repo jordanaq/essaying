@@ -1,5 +1,7 @@
 :root {
+  color-scheme: dark;
   --ctp-rosewater: #f4dbd6;
+  --ctp-red: #ed8796;
   --ctp-text: #cad3f5;
   --ctp-subtext1: #b8c0e0;
   --ctp-subtext0: #a5adcb;
@@ -32,7 +34,9 @@
 }
 
 :root[data-theme="latte"] {
+  color-scheme: light;
   --ctp-rosewater: #dc8a78;
+  --ctp-red: #d20f39;
   --ctp-text: #4c4f69;
   --ctp-subtext1: #5c5f77;
   --ctp-subtext0: #6c6f85;
@@ -300,15 +304,8 @@ sl-tree-item .tree-item-actions sl-icon-button::part(base) {
   height: 24px;
   border-radius: 3px;
   color: var(--ctp-subtext1);
-  opacity: 0;
-  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
-}
-
-sl-tree-item:hover .tree-item-actions sl-icon-button::part(base),
-sl-tree-item:focus-within .tree-item-actions sl-icon-button::part(base),
-sl-tree-item[selected] .tree-item-actions sl-icon-button::part(base),
-sl-tree-item.workspace-root .tree-item-actions sl-icon-button::part(base) {
   opacity: 1;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 sl-tree-item .tree-item-actions sl-icon-button::part(base):hover {
@@ -418,6 +415,20 @@ sl-input::part(input),
 sl-textarea::part(textarea),
 sl-select::part(display-input) {
   color: var(--ctp-text);
+}
+
+/* Popup panels live inside Shoelace shadow roots. Shared tokens theme both
+   explorer menus and select listboxes, including their hover/focus states. */
+sl-dropdown,
+sl-menu,
+sl-select {
+  --sl-panel-background-color: var(--ctp-mantle);
+  --sl-panel-border-color: var(--ctp-surface2);
+  --sl-color-neutral-0: var(--app-primary-fg);
+  --sl-color-neutral-100: var(--ctp-surface0);
+  --sl-color-neutral-200: var(--ctp-surface2);
+  --sl-color-neutral-700: var(--ctp-text);
+  --sl-color-neutral-1000: var(--ctp-text);
 }
 
 /* Keep the details summary strip and text container on one unified tone. */

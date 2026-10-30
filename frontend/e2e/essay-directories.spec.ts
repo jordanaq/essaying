@@ -72,6 +72,80 @@ async function setup(page: Page) {
   return { state, essays, finishSave };
 }
 
+for (const width of [390, 1280]) {
+  test(`explorer menus preserve selection and support keyboard access at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await setup(page);
+    const selected = page.locator('sl-tree-item[data-path=\'["First Essay"]\']');
+    const prompt = page.getByRole("textbox", { name: "Assignment prompt", exact: true });
+    await prompt.fill("Unsaved assignment");
+
+    const folderActions = page.getByRole("button", { name: "Actions for Notes", exact: true });
+    await folderActions.click();
+    await expect(page.getByRole("menuitem", { name: "Create essay", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Create folder", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Delete folder", exact: true })).toBeVisible();
+    await expect(selected).toHaveAttribute("selected");
+    await expect(prompt).toHaveValue("Unsaved assignment");
+    await page.keyboard.press("Escape");
+    await expect(folderActions).toBeFocused();
+    await expect(page.getByRole("menu", { name: "Notes actions", exact: true })).not.toBeVisible();
+
+    const workspaceActions = page.getByRole("button", { name: "Actions for Workspace", exact: true });
+    await workspaceActions.focus();
+    await Promise.all([
+      page.locator('sl-menu[aria-label="Workspace actions"]').evaluate((menu) => new Promise<void>((resolve) => {
+        menu.parentElement!.addEventListener("sl-after-show", () => resolve(), { once: true });
+      })),
+      workspaceActions.press("ArrowDown")
+    ]);
+    const createEssay = page.getByRole("menuitem", { name: "Create essay", exact: true });
+    await expect(createEssay).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("menuitem", { name: "Create folder", exact: true })).toBeFocused();
+    await expect(page.getByRole("menuitem", { name: /Delete/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(workspaceActions).toBeFocused();
+    await expect(page.getByRole("menu", { name: "Workspace actions", exact: true })).not.toBeVisible();
+
+    await page.getByRole("button", { name: "Actions for Second Essay", exact: true }).click();
+    await expect(page.getByRole("menuitem")).toHaveCount(1);
+    await page.getByRole("menuitem", { name: "Delete essay", exact: true }).click();
+    await expect(page.getByText("Delete Second Essay? This cannot be undone.")).toBeVisible();
+    await expect(selected).toHaveAttribute("selected");
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(prompt).toHaveValue("Unsaved assignment");
+  });
+}
+
+test("explorer menus and model popups follow dark and light themes", async ({ page }) => {
+  await setup(page);
+  for (const palette of [
+    { background: "rgb(30, 32, 48)", text: "rgb(202, 211, 245)" },
+    { background: "rgb(230, 233, 239)", text: "rgb(76, 79, 105)" }
+  ]) {
+    await page.getByRole("button", { name: "Actions for Workspace", exact: true }).click();
+    const menu = page.getByRole("menu", { name: "Workspace actions", exact: true });
+    await expect(menu).toHaveCSS("background-color", palette.background);
+    const item = menu.getByRole("menuitem", { name: "Create folder", exact: true });
+    await expect.poll(() => item.evaluate((element) => getComputedStyle(element.shadowRoot!.querySelector('[part="base"]')!).color)).toBe(palette.text);
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toBeVisible();
+
+    await page.getByRole("combobox", { name: "Model", exact: true }).click();
+    const listbox = page.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await expect(listbox).toHaveCSS("background-color", palette.background);
+    const option = page.getByRole("option", { name: "gpt-5.6-luna", exact: true });
+    await expect.poll(() => option.evaluate((element) => getComputedStyle(element.shadowRoot!.querySelector('[part="base"]')!).color)).toBe(palette.text);
+    await page.keyboard.press("Escape");
+    await expect(listbox).not.toBeVisible();
+    if (palette.background === "rgb(30, 32, 48)") {
+      await page.getByRole("button", { name: "Switch to Light", exact: true }).click();
+    }
+  }
+});
+
 test("independent saves preserve sibling edits and typing during a pending save", async ({ page }) => {
   const { state, finishSave } = await setup(page);
   const draft = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
@@ -88,7 +162,7 @@ test("independent saves preserve sibling edits and typing during a pending save"
   await page.getByText("Save Prompt", { exact: true }).click();
   await expect.poll(() => state.pending !== null).toBe(true);
   await page.locator('.tree-item-name[title="Second Essay"]').click();
-  await expect(page.getByText("Wait for the current save or workspace change to finish.", { exact: true })).toBeVisible();
+  await expect(page.locator("sl-badge").filter({ hasText: "Wait for the current save or workspace change to finish." })).toBeVisible();
   await expect(draft).toHaveValue("Updated draft");
   await prompt.fill("Typed after save started");
   await draft.fill("Unsaved sibling draft");
@@ -136,7 +210,8 @@ test("discard restores each field's latest saved value without discarding its si
 test("creating an essay while a populated essay is selected starts with a blank prompt and draft", async ({ page }) => {
   const { state, essays } = await setup(page);
   await expect(page.getByRole("textbox", { name: "Assignment prompt", exact: true })).toHaveValue("First assignment");
-  await page.locator('sl-icon-button[title="Create essay in Workspace"]').click();
+  await page.getByRole("button", { name: "Actions for Workspace", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Create essay", exact: true }).click();
   await page.getByRole("textbox", { name: "Essay name" }).fill("New Essay");
   await page.getByRole("button", { name: "Create Essay", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("");

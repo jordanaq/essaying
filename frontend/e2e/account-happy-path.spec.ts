@@ -134,7 +134,8 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
     const createFolderResponse = page.waitForResponse((response) =>
       response.url().endsWith("/workspace/directories") && response.request().method() === "POST"
     );
-    await page.locator('sl-icon-button[title="Create folder in Workspace"]').click();
+    await page.getByRole("button", { name: "Actions for Workspace", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Create folder", exact: true }).click();
     await page.getByRole("textbox", { name: "Folder name" }).fill(folderName);
     await page.getByRole("button", { name: "Create Folder", exact: true }).click();
     expect((await createFolderResponse).ok()).toBe(true);
@@ -146,7 +147,8 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
     const createEssayResponse = page.waitForResponse((response) =>
       response.url().endsWith("/workspace/essays") && response.request().method() === "POST"
     );
-    await folderRow.locator(`sl-icon-button[title="Create essay in ${folderName}"]`).click();
+    await page.getByRole("button", { name: `Actions for ${folderName}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Create essay", exact: true }).click();
     await page.getByRole("textbox", { name: "Essay name" }).fill(essayName);
     await page.getByRole("button", { name: "Create Essay", exact: true }).click();
     const essayResponse = await createEssayResponse;
@@ -157,13 +159,14 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
     });
     const essayRow = page.locator(`sl-tree-item[data-path='["${folderName}","${essayName}"]']`);
     await expect(essayRow).toBeVisible();
-    await expect(essayRow.locator('sl-icon-button[title^="Create"]')).toHaveCount(0);
+    await expect(essayRow.locator('sl-menu-item[value="essay"], sl-menu-item[value="folder"]')).toHaveCount(0);
     await essayRow.hover();
 
     const deleteEssayResponse = page.waitForResponse((response) =>
       response.request().method() === "DELETE"
     );
-    await essayRow.locator(`sl-icon-button[title="Delete essay ${essayName}"]`).click();
+    await page.getByRole("button", { name: `Actions for ${essayName}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Delete essay", exact: true }).click();
     await expect(page.getByText(`Delete ${essayName}? This cannot be undone.`)).toBeVisible();
     await expect(page.getByText(/This permanently deletes the essay, assignment prompt/)).toBeVisible();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
@@ -176,7 +179,8 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
       response.url().endsWith("/workspace/essays") && response.request().method() === "POST"
     );
     await folderRow.hover();
-    await folderRow.locator(`sl-icon-button[title="Create essay in ${folderName}"]`).click();
+    await page.getByRole("button", { name: `Actions for ${folderName}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Create essay", exact: true }).click();
     await page.getByRole("textbox", { name: "Essay name" }).fill(nestedEssayName);
     await page.getByRole("button", { name: "Create Essay", exact: true }).click();
     expect((await createNestedEssayResponse).ok()).toBe(true);
@@ -185,7 +189,8 @@ test("create and delete a folder and essay from the workspace tree", async ({ pa
       response.request().method() === "DELETE"
     );
     await folderRow.hover();
-    await folderRow.locator(`sl-icon-button[title="Delete folder ${folderName}"]`).click();
+    await page.getByRole("button", { name: `Actions for ${folderName}`, exact: true }).click();
+    await page.getByRole("menuitem", { name: "Delete folder", exact: true }).click();
     await expect(page.getByText("This also permanently deletes everything inside the folder.")).toBeVisible();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     const directoryDelete = await deleteDirectoryResponse;

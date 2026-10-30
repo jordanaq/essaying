@@ -13,6 +13,7 @@
 </script>
 
 <script lang="ts">
+  import WorkspaceActions from "./WorkspaceActions.svelte";
   import "@shoelace-style/shoelace/dist/components/tree/tree.js";
   import "@shoelace-style/shoelace/dist/components/tree-item/tree-item.js";
   import "@shoelace-style/shoelace/dist/components/icon-button/icon-button.js";
@@ -113,22 +114,9 @@
       <span class="tree-item-content">
         <span class="folder-icon" aria-hidden="true"></span>
         <span class="tree-item-name" title="Workspace">Workspace</span>
-        <span class="tree-item-actions" aria-label="Workspace actions">
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-icon-button
-            name="folder-plus"
-            label="Create folder in Workspace"
-            title="Create folder in Workspace"
-            on:click|stopPropagation={() => onCreateDirectory([])}
-          ></sl-icon-button>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-icon-button
-            name="file-earmark-plus"
-            label="Create essay in Workspace"
-            title="Create essay in Workspace"
-            on:click|stopPropagation={() => onCreateEssay([])}
-          ></sl-icon-button>
-        </span>
+        <WorkspaceActions name="Workspace" root
+          onCreateEssay={() => onCreateEssay([])}
+          onCreateDirectory={() => onCreateDirectory([])} onDelete={() => {}} />
       </span>
     {#each sortedNodes as node (node.path.join("/"))}
       <sl-tree-item
@@ -141,41 +129,9 @@
         <span class="tree-item-content">
           <span class:folder-icon={isDirectory(node)} class:file-icon={!isDirectory(node)} aria-hidden="true"></span>
           <span class="tree-item-name" title={node.name}>{node.name}</span>
-          {#if isDirectory(node)}
-            <span class="tree-item-actions" aria-label={`${node.name} actions`}>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-icon-button
-                name="folder-plus"
-                label={`Create folder in ${node.name}`}
-                title={`Create folder in ${node.name}`}
-                on:click|stopPropagation={() => onCreateDirectory(node.path)}
-              ></sl-icon-button>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-icon-button
-                name="file-earmark-plus"
-                label={`Create essay in ${node.name}`}
-                title={`Create essay in ${node.name}`}
-                on:click|stopPropagation={() => onCreateEssay(node.path)}
-              ></sl-icon-button>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-icon-button
-                name="trash"
-                label={`Delete folder ${node.name}`}
-                title={`Delete folder ${node.name}`}
-                on:click|stopPropagation={() => onDelete(node)}
-              ></sl-icon-button>
-            </span>
-          {:else}
-            <span class="tree-item-actions" aria-label={`${node.name} actions`}>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-icon-button
-                name="trash"
-                label={`Delete essay ${node.name}`}
-                title={`Delete essay ${node.name}`}
-                on:click|stopPropagation={() => onDelete(node)}
-              ></sl-icon-button>
-            </span>
-          {/if}
+          <WorkspaceActions name={node.name} directory={isDirectory(node)}
+            onCreateEssay={() => onCreateEssay(node.path)}
+            onCreateDirectory={() => onCreateDirectory(node.path)} onDelete={() => onDelete(node)} />
         </span>
         {#if isDirectory(node) && node.children.length > 0}
           <svelte:self
@@ -207,41 +163,9 @@
       <span class="tree-item-content">
         <span class:folder-icon={isDirectory(node)} class:file-icon={!isDirectory(node)} aria-hidden="true"></span>
         <span class="tree-item-name" title={node.name}>{node.name}</span>
-        {#if isDirectory(node)}
-          <span class="tree-item-actions" aria-label={`${node.name} actions`}>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-icon-button
-              name="folder-plus"
-              label={`Create folder in ${node.name}`}
-              title={`Create folder in ${node.name}`}
-              on:click|stopPropagation={() => onCreateDirectory(node.path)}
-            ></sl-icon-button>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-icon-button
-              name="file-earmark-plus"
-              label={`Create essay in ${node.name}`}
-              title={`Create essay in ${node.name}`}
-              on:click|stopPropagation={() => onCreateEssay(node.path)}
-            ></sl-icon-button>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-icon-button
-              name="trash"
-              label={`Delete folder ${node.name}`}
-              title={`Delete folder ${node.name}`}
-              on:click|stopPropagation={() => onDelete(node)}
-            ></sl-icon-button>
-          </span>
-        {:else}
-          <span class="tree-item-actions" aria-label={`${node.name} actions`}>
-            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-            <sl-icon-button
-              name="trash"
-              label={`Delete essay ${node.name}`}
-              title={`Delete essay ${node.name}`}
-              on:click|stopPropagation={() => onDelete(node)}
-            ></sl-icon-button>
-          </span>
-        {/if}
+        <WorkspaceActions name={node.name} directory={isDirectory(node)}
+          onCreateEssay={() => onCreateEssay(node.path)}
+          onCreateDirectory={() => onCreateDirectory(node.path)} onDelete={() => onDelete(node)} />
       </span>
       {#if isDirectory(node) && node.children.length > 0}
         <svelte:self
