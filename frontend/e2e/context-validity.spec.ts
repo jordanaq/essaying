@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("context validity gates grading while editing, saving, and collapsed-panel recovery remain usable", async ({ page }) => {
-  const context = { title: "Saved settings", audience: null, model: null, tags: [], instructions: [], grading_directions: [], rubric: {} };
+  const context = { title: "Saved settings", audience: null, model: "gpt-6.1-sol", tags: [], instructions: [], grading_directions: [], rubric: { clarity: { weight: 1, description: null } } };
   const essays = ["First Essay", "Second Essay"].map((name) => ({ path: [name], title: name, prompt: "", markdown: `# ${name}` }));
   let firstReads = 0;
   let repaired = false;
@@ -27,6 +27,8 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
       }
     } else if (url.pathname.endsWith("/context")) {
       await route.fulfill({ status: 404, json: { error: { message: "Context does not exist." } } });
+    } else if (url.pathname.endsWith("/ai/grade")) {
+      await route.fulfill({ json: { overallScore: 80, feedback: "Real grading response.", criteria: { clarity: { score: 80, feedback: "Clear argument.", normalizedWeight: 1 } } } });
     } else {
       const essay = essays.find((item) => decodeURIComponent(url.pathname).endsWith(`/essays/${item.title}`));
       if (essay) {
@@ -37,13 +39,14 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
   });
 
   await page.goto("/");
-  const grade = page.locator("sl-button").filter({ hasText: "Grade (mock stream)" });
+  const grade = page.locator("sl-button").filter({ hasText: "Grade essay" });
   await expect.poll(() => !!releaseInitial).toBe(true);
   await expect(grade).toHaveJSProperty("disabled", true);
   await releaseInitial!();
   await expect(grade).toHaveJSProperty("disabled", false);
   await grade.click();
-  await expect(page.getByText("Streaming grading preview", { exact: true })).toBeVisible();
+  await expect(page.getByText("Real grading response.", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Context", exact: true }).click();
 
   await page.getByRole("button", { name: "Refresh preview" }).click();
   await expect.poll(() => !!releaseStale).toBe(true);

@@ -2,6 +2,8 @@
   import { onDestroy, onMount } from "svelte";
   import ContextPanel from "./ContextPanel.svelte";
   import PromptGenerator from "./PromptGenerator.svelte";
+  import GradeFeedback from "./GradeFeedback.svelte";
+  import { gradeEssay, type GradeResult } from "./grading-api";
   import { defaultModel, providerModels } from "./provider-models";
   import { createContextPreview, contextSelection } from "./context-preview";
   import WorkspaceTree, { type WorkspaceNode, type WorkspaceNodeType } from "./WorkspaceTree.svelte";
@@ -94,7 +96,21 @@
   $: promptDirty = selectedWorkspaceEssay !== null && prompt !== selectedWorkspaceEssay.prompt;
   $: hasUnsavedChanges = draftDirty || promptDirty || contextDirty;
   $: operationPending = savingDraft || savingPrompt || contextBusy || workspaceCreateBusy || workspaceDeleteBusy;
-  $: canGrade = contextReady && !hasUnsavedChanges && !operationPending && !essayLoading;
+  $: rubricWeights = Object.values($contextPreview.context?.rubric ?? {}).map((criterion) => criterion.weight);
+  $: rubricTotal = rubricWeights.reduce((total, weight) => total + weight, 0);
+  $: gradeUnavailable = !selectedWorkspaceEssay ? "Select an essay to grade."
+    : essayLoading || workspaceLoading ? "Wait for the essay to finish loading."
+    : operationPending ? "Wait for the current save or workspace change to finish."
+    : hasUnsavedChanges ? "Save or discard your changes before grading."
+    : !contextReady ? contextUnavailable
+    : !selectedWorkspaceEssay.markdown.trim() ? "Write and save a nonblank draft before grading."
+    : !rubricWeights.length ? "Add at least one rubric criterion in Context, or inherit a rubric from a parent folder."
+    : rubricWeights.some((weight) => !Number.isFinite(weight) || weight < 0) || !Number.isFinite(rubricTotal) || rubricTotal <= 0
+      ? "The effective rubric needs a finite, positive total weight."
+    : !($contextPreview.context?.model ?? activeAccount?.preferredModel)?.trim()
+      ? "Select a model in Context or your account preferences."
+    : "";
+  $: canGrade = !gradeUnavailable && !grading;
   let model = defaultModel;
   let accounts: AccountProfile[] = [];
   let loadingAccounts = false;
@@ -111,7 +127,14 @@
     : $contextPreview.selection !== contextSelection(activeAccountId, selectedWorkspaceEssay.path) || $contextPreview.status === "loading" || $contextPreview.status === "idle"
       ? "Checking writing context…"
       : "Grading is unavailable until writing context resolves. Retry in the Context panel.";
-  let gradeStream = "";
+  let grading = false;
+  let gradeResult: GradeResult | null = null;
+  let gradeError = "";
+  let gradeController: AbortController | undefined;
+  let gradedInputs = "";
+  $: currentGradeInputs = JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path, essayRevision,
+    markdown, prompt, $contextPreview.context, activeAccount?.preferredModel]);
+  $: gradeStale = gradeResult !== null && (gradedInputs !== currentGradeInputs || !contextReady || contextDirty || contextBusy);
   let status = "Idle";
   let backendMessage = "Not fetched";
   let backendContextTitle = "-";
@@ -238,6 +261,7 @@
   }
 
   onDestroy(() => {
+    gradeController?.abort();
     essayController?.abort();
     workspaceController?.abort();
     contextPreview.cancel();
@@ -262,6 +286,11 @@
   }
 
   function invalidateEssayLoad() {
+    gradeController?.abort();
+    gradeResult = null;
+    gradeError = "";
+    grading = false;
+    gradedInputs = "";
     essayRevision += 1;
     essayController?.abort();
     essayLoading = false;
@@ -275,7 +304,6 @@
     markdown = essay.markdown;
     prompt = essay.prompt;
     draftError = promptError = draftNotice = promptNotice = "";
-    gradeStream = "";
   }
 
   function reloadWorkspace() {
@@ -647,18 +675,29 @@
     }
   }
 
-  function mockGrade() {
-    if (!canGrade) return;
-    status = "Streaming grading preview";
-    const chunks = [
-      "Clarity: strong structure. ",
-      "Evidence: add 1-2 citations. ",
-      "Argument: tighten thesis language."
-    ];
-
-    gradeStream = "";
-    for (const chunk of chunks) {
-      gradeStream += chunk;
+  async function requestGrade() {
+    if (!canGrade || !activeAccountId || !selectedWorkspaceEssay || !$contextPreview.context) return;
+    const request = new AbortController();
+    gradeController = request;
+    gradedInputs = currentGradeInputs;
+    grading = true;
+    gradeResult = null;
+    gradeError = "";
+    activeFeedbackTab = "feedback";
+    panelState = { ...panelState, feedback: true };
+    status = `Grading ${selectedWorkspaceEssay.title}`;
+    try {
+      const result = await gradeEssay(activeAccountId, selectedWorkspaceEssay.path,
+        Object.keys($contextPreview.context.rubric), request.signal);
+      if (request.signal.aborted) return;
+      gradeResult = result;
+      status = "Grading complete";
+    } catch (cause) {
+      if (request.signal.aborted) return;
+      gradeError = cause instanceof Error ? cause.message : String(cause);
+      status = "Grading failed";
+    } finally {
+      if (!request.signal.aborted) grading = false;
     }
   }
 
@@ -1178,12 +1217,12 @@
           <sl-button variant="text" disabled={!draftDirty || savingDraft}
             on:click={() => { markdown = selectedWorkspaceEssay?.markdown ?? ""; draftError = draftNotice = ""; }}>Discard draft changes</sl-button>
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="default" on:click={mockGrade} disabled={!canGrade} aria-describedby={canGrade ? undefined : "grade-context-status"}>Grade (mock stream)</sl-button>
+          <sl-button variant="default" on:click={requestGrade} disabled={!canGrade} aria-describedby={canGrade ? undefined : "grade-context-status"}>{grading ? "Grading…" : "Grade essay"}</sl-button>
         </div>
         {#if draftError}<p class="login-error" role="alert">{draftError}</p>{/if}
         {#if selectedWorkspaceEssay}<p class="footer-note" role="status">{draftDirty ? "Unsaved draft changes" : draftNotice || "Draft saved"}</p>{/if}
         {#if essayLoading}<p class="footer-note" role="status">Loading essay…</p>{/if}
-        {#if !canGrade}<p id="grade-context-status" class="footer-note" role="status">{hasUnsavedChanges ? "Save or discard your changes before grading." : contextUnavailable}</p>{/if}
+        {#if !canGrade}<p id="grade-context-status" class="footer-note" role="status">{grading ? "Grading your saved essay…" : gradeUnavailable}</p>{/if}
         {#if selectedWorkspaceEssay}
           <p class="footer-note">Currently editing {pathToLabel(selectedWorkspaceEssay.path)}.</p>
         {:else}
@@ -1235,23 +1274,8 @@
           </fieldset>
         </div>
         <div id="feedback-tabpanel" role="tabpanel" aria-labelledby="feedback-tab" tabindex="0" hidden={activeFeedbackTab !== "feedback"}>
-          <sl-input label="Backend status" value={backendMessage} readonly></sl-input>
-
-          <div class="backend-meta">
-            <sl-badge variant="neutral">Title: {backendContextTitle}</sl-badge>
-            <sl-badge variant="neutral">Model: {backendContextModel}</sl-badge>
-            <sl-badge variant="neutral">Instructions: {backendInstructionCount}</sl-badge>
-          </div>
-
-          <sl-textarea
-            style="margin-top: 10px"
-            label="Streaming Grade Output"
-            rows="14"
-            value={gradeStream}
-            readonly
-          ></sl-textarea>
-
-          <p class="footer-note">Grading is a preview with sample feedback.</p>
+          <GradeFeedback result={gradeResult} loading={grading} error={gradeError} stale={gradeStale}
+            essayTitle={selectedWorkspaceEssay?.title ?? ""} />
         </div>
       </div>
     </sl-card>

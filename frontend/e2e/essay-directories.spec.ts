@@ -42,7 +42,7 @@ async function setup(page: Page) {
       essays.push(essay);
       await route.fulfill({ status: 201, json: essay });
     } else if (path.endsWith("/context/effective")) {
-      await route.fulfill({ json: { title: null, audience: null, model: null, tags: [], instructions: [], grading_directions: [], rubric: {} } });
+      await route.fulfill({ json: { title: null, audience: null, model: "gpt-6.1-sol", tags: [], instructions: [], grading_directions: [], rubric: { clarity: { weight: 1, description: null } } } });
     } else if (path.endsWith("/context")) {
       const key = url.searchParams.get("path") ?? request.postDataJSON().path;
       if (request.method() === "GET") {
@@ -401,9 +401,9 @@ for (const width of [390, 1280]) {
     await setup(page);
     const prompt = await editField(page, "prompt");
     const draft = await editField(page, "draft");
-    const grade = page.getByRole("button", { name: "Grade (mock stream)", exact: true });
+    const grade = page.getByRole("button", { name: "Grade essay", exact: true });
     await expect(grade).toBeDisabled();
-    const controls = ["Save Prompt", "Discard prompt changes", "Save Draft", "Discard draft changes", "Grade (mock stream)"];
+    const controls = ["Save Prompt", "Discard prompt changes", "Save Draft", "Discard draft changes", "Grade essay"];
     const rectangles = [];
     for (const name of controls) {
       const button = page.getByRole("button", { name, exact: true });

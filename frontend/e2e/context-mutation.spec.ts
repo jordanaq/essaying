@@ -5,7 +5,7 @@ for (const operation of ["save", "delete"] as const) {
     test(`grading waits for context ${operation} ${succeeds ? "success" : "failure"} and subsequent resolution`, async ({ page }) => {
       const essay = { path: ["Draft"], title: "Draft", prompt: "", markdown: "# Draft" };
       const initialLayer = { title: { tag: "SetScalar", contents: "Saved title" } };
-      const effective = { title: "Saved title", audience: null, model: null, tags: [], instructions: [], grading_directions: [], rubric: {} };
+      const effective = { title: "Saved title", audience: null, model: "gpt-6.1-sol", tags: [], instructions: [], grading_directions: [], rubric: { clarity: { weight: 1, description: null } } };
       let mutation: Route | undefined;
       let resolution: Route | undefined;
       let effectiveReads = 0;
@@ -31,7 +31,7 @@ for (const operation of ["save", "delete"] as const) {
 
       await page.goto("/");
       const panel = page.getByRole("region", { name: "Writing context" });
-      const grade = page.locator("sl-button").filter({ hasText: "Grade (mock stream)" });
+      const grade = page.locator("sl-button").filter({ hasText: "Grade essay" });
       await expect(grade).toHaveJSProperty("disabled", false);
       await expect(panel.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Saved title");
       if (operation === "save") {
