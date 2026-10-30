@@ -1,7 +1,8 @@
 # Context inheritance design
 
-Status: draft for review. The inheritance behavior below reflects the agreed
-product decisions; JSON syntax, field names, and API details are proposed.
+Status: JSON inheritance and account-scoped context APIs implemented; reviewed
+2026-10-26. Grading/provider behavior and the remaining UI requirements below
+are planned. Contributing-file output is optional stretch scope (L07).
 
 ## Purpose and scope
 
@@ -41,7 +42,7 @@ This is not an atomic snapshot of multiple files edited concurrently.
 Initially, resolve from disk on every context inspection and LLM request. Caching
 and file watching are unnecessary for the first implementation.
 
-## Proposed fields and merge rules
+## Fields and merge rules
 
 The table describes effective values. Source files wrap supplied values in the
 explicit operations described below.
@@ -334,14 +335,15 @@ only validated account and workspace-relative paths. Reject context resolution
 through symbolic links, including ancestor directories and context files, so
 inheritance cannot cross workspace boundaries.
 
-Report workspace-relative file path, field path, a useful message, and source
-line/column when available. For example:
+Context errors include a safe message and workspace-relative file/field details
+when known. Rejected paths and raw OS/parser messages are omitted. Source
+line/column coordinates are not currently emitted. For example:
 
 ```json
 {
   "error": {
     "code": "INVALID_CONTEXT",
-    "message": "Rubric weight must be nonnegative.",
+    "message": "Rubric weight must be a finite, nonnegative number.",
     "details": {
       "path": "History/context.json",
       "field": "rubric.contents.evidence.weight"
@@ -350,12 +352,26 @@ line/column when available. For example:
 }
 ```
 
-The UI displays context errors alongside the selected essay and disables LLM
-actions. The backend independently enforces the same validation before any
-provider call. Writing, loading, and saving essays do not depend on successful
-context resolution.
+The UI currently displays error messages; file/field details are available in
+the HTTP response but are not rendered by the panel (post-MVP L09). The mock
+grading button requires a successful context resolution for the current account
+and essay; loading and errors disable it. Future provider handlers
+must independently validate context before calling a provider (E06/E08).
+Writing, loading, and saving essays do not depend on context resolution.
+See [Context error handling](CONTEXT_ERRORS.md) for the implemented error contract.
 
 ## LLM behavior
+
+Provider scope (clarified 2026-10-27): support any provider implementing the
+required OpenAI-compatible API, using a configurable provider base URL and API
+key. OpenAI hosting is not required. Provider connection settings belong to the
+backend environment, not inherited context or browser requests. Proposed names
+are `OPENAI_BASE_URL` and `OPENAI_API_KEY`; these are planned E06 settings, not
+implemented configuration. Model IDs are interpreted by the configured provider.
+Compatibility is operation-specific: unsupported endpoints or capabilities must
+produce actionable errors rather than assuming all providers support the same
+API features. Send essay text and relevant context only when an AI action is
+requested; local editing and saving remain independent of provider access.
 
 - Use the effective `model`; when unset, fall back to the account's preferred
   model. If neither is set, block the request with an actionable error.
@@ -370,46 +386,98 @@ context edits do not change an in-flight generation or grading request.
 
 ## Backend and UI integration
 
-Proposed read endpoint, following the implemented account-scoped API layout:
+The implemented base is
+`/api/v1/accounts/:accountId/workspace/context`. The account is selected by the
+URL, without an `X-Account-Id` header. Paths use forward slashes, are relative to
+that account's workspace, and should be URL-encoded in query parameters.
 
-`GET /api/v1/accounts/:accountId/workspace/context?path=History/French-Revolution/causes.md`
+| Method and suffix | Input | Success |
+| --- | --- | --- |
+| GET `?path=History/context.json` | Existing folder's layer path | 200, a `ContextLayer` containing saved operations |
+| GET `/effective?path=History/essay.md` | Existing markdown essay path | 200, an `EffectiveContext` containing resolved values |
+| POST | JSON `{"path":"History/context.json","contextLayer":{...}}` | 201, the persisted `ContextLayer` |
+| PUT | Same body as POST | 200, the persisted `ContextLayer` |
+| DELETE | JSON `{"path":"History/context.json"}` | 204, no response body |
 
-The path identifies an existing essay; the backend resolves its containing
-directory. Return the effective context and an ordered list of contributing
-workspace-relative context file paths. Return 400 for invalid paths, 404 for
-missing accounts or essays, 422 for invalid context, and a structured server error
-for unexpected I/O failures. Do not expose absolute filesystem paths.
+For example, POST or PUT accepts:
 
-The UI loads this endpoint when selecting an essay and can refresh the context
-inspection manually. Each LLM request resolves again, so a stale preview cannot
-determine the request's behavior. Field-level provenance and an in-app context
-editor are deferred; users initially edit source JSON files directly.
+```json
+{
+  "path": "History/context.json",
+  "contextLayer": {
+    "audience": {"tag": "SetScalar", "contents": "Students"},
+    "instructions": {"tag": "AppendList", "contents": ["Use sources."]}
+  }
+}
+```
 
-## Implementation plan
+POST requires an absent layer; PUT requires an existing layer and can repair
+malformed stored JSON. Parent directories must exist. No filesystem root is
+accepted in the body. POST/PUT accept only `path` and `contextLayer`; DELETE
+accepts only `path`. Writes are validated and persisted before success is returned.
 
-1. Define separate `ContextLayer` and `EffectiveContext` types in
-   `Essaying.Types.Context`, along with the operation types and `RubricCriterion`.
-   Register the module in both Cabal component module lists. Parsed layers
-   preserve omitted fields, scalar clears, and collection operations; resolved
-   values contain no merge directives.
-2. Implement generic JSON decoding with strict options and additional validation.
-   Add a pure, explicitly ordered `applyLayer parent layer` function. Replace the current ambiguous `Semigroup`
-   merge; its scalar and rubric precedence should not define the new contract.
-3. Replace the `loadEffectiveContext` stub with account-rooted discovery,
-   validation, and resolution returning structured errors.
-4. Add the read endpoint and context inspection/error states in the frontend.
-   Adapt the ready/sample handler to the new resolver without tying liveness
-   checks to a user's context validity.
-5. Integrate the resolver into future LLM handlers before provider requests.
+A layer response contains the saved operation objects, with unset fields encoded
+as `null`. Effective context is returned directly, without an enclosing wrapper:
 
-Migrate existing sample YAML files to `context.json` and wrap their values in
-explicit operations. YAML files and the earlier shorthand forms are not supported
-by the new resolver; this is a format migration, not backward compatibility.
-Update sample-loading code and fixtures alongside that implementation. Missing
-layer fields decode to `Nothing`; effective collection defaults are assigned by
-the resolver rather than inferred from generic decoding.
+```json
+{
+  "title": null,
+  "audience": "Students",
+  "model": null,
+  "tags": [],
+  "instructions": ["Use sources."],
+  "grading_directions": [],
+  "rubric": {}
+}
+```
+
+A missing layer GET returns 404; missing layers during effective resolution are
+skipped, and no layers yields the default effective context. Invalid paths
+return 400, symlinks 403, missing resources 404, create collisions 409, invalid
+context 422, and handled I/O failures 500. Error details are documented in
+[CONTEXT_ERRORS.md](CONTEXT_ERRORS.md).
+
+The effective response does not include contributing-file paths or field
+provenance. Ordered contributing-file output and its tests are stretch task L07,
+deferred by user decision on 2026-10-26; per-field provenance remains optional
+under L01. Neither is required for E04.
+
+The Context tab already provides folder-layer editing, ancestor scope selection,
+inherited list previews, create/update/delete, and an effective essay preview.
+The preview loads on essay selection and refreshes after context mutations.
+`Reload` reloads the layer and inherited lists; `Retry preview` retries a failed
+effective-context request. `Refresh preview` rereads saved effective context
+without discarding unsaved layer edits. Grading is gated on successful resolution
+for the current account/essay, including while the Context panel is collapsed.
+Late responses from old selections are ignored. Context errors leave essay
+editing/saving usable; retry after repair restores grading eligibility. Error
+messages are displayed, but file/field display (L09) and in-app repair of malformed
+layers (L08) remain post-MVP.
+
+Each future LLM request must resolve context again and hold one snapshot for
+that operation, independently of any frontend preview. Provider calls are not
+implemented yet.
+
+## Implementation status
+
+Implemented: separate `ContextLayer`/`EffectiveContext` types; strict JSON layer
+loading; ordered inheritance; account-scoped context reads and mutations;
+structured context errors; folder-layer editor and effective preview; migrated
+JSON sample fixtures. Readiness returns default sample context without loading
+user context, so malformed configuration does not fail readiness.
+
+Sample YAML and shorthand layers have been migrated to operation-based JSON.
+The resolver does not support those older source formats. Missing layer fields
+decode to `Nothing`; resolved collection defaults are assigned by the resolver.
+
+Pending: E05 UI refresh/gating behavior and E06/E08 provider enforcement and
+grading validation/normalization. Contributing paths are stretch scope L07;
+caching/file watching and per-field provenance remain optional.
 
 ## Acceptance checks
+
+These include implemented resolver checks and planned provider/UI requirements;
+provider-related checks are not claims of completed functionality.
 
 - Root-only, nested, missing-file, and empty-object cases resolve predictably.
 - Nearest scalar operations win; omission and top-level field null inherit;
