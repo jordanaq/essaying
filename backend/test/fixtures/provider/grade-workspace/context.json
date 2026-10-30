@@ -1,0 +1,31 @@
+{
+  "title": {"tag": "SetScalar", "contents": "Hume and Kierkegaard on religion"},
+  "audience": {"tag": "SetScalar", "contents": "Undergraduate philosophy students writing for an educated reader."},
+  "model": {"tag": "SetScalar", "contents": "gpt-6.1-sol"},
+  "tags": {"tag": "ReplaceList", "contents": ["philosophy", "religion", "Hume", "Kierkegaard"]},
+  "instructions": {
+    "tag": "ReplaceList",
+    "contents": [
+      "Develop a focused comparative thesis about reason, evidence, and religious commitment.",
+      "Interpret both thinkers fairly and address a serious objection.",
+      "Support interpretations with primary-text discussion; distinguish dialogue speakers and pseudonymous authors from their authors."
+    ]
+  },
+  "grading_directions": {
+    "tag": "ReplaceList",
+    "contents": [
+      "Assess the saved draft, not an imagined improved version.",
+      "Reward reasoned interpretation rather than agreement with a religious or nonreligious position.",
+      "Distinguish unsupported generalizations from supported textual analysis. Do not invent quotations or page references."
+    ]
+  },
+  "rubric": {
+    "tag": "ReplaceRubric",
+    "contents": {
+      "interpretation": {"weight": 3, "description": "Explains the relevant arguments accurately and distinguishes authorial voices."},
+      "comparison": {"weight": 3, "description": "Develops a shared question and substantive similarities and differences."},
+      "evidence": {"weight": 2, "description": "Supports interpretations with specific primary-text discussion rather than ungrounded generalization."},
+      "argument": {"weight": 2, "description": "Defends a clear thesis and evaluates a serious objection."}
+    }
+  }
+}

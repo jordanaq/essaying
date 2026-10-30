@@ -9,7 +9,9 @@ module Essaying.Types.Ai (
     GradeRequest (..),
     GradeResponse (..),
     CriterionGrade (..),
-    PromptProviderError (..)
+    ProviderGrade (..),
+    ProviderCriterionGrade (..),
+    ProviderError (..)
 )
 where
 
@@ -54,9 +56,23 @@ data CriterionGrade = CriterionGrade
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
-data PromptProviderError
+data ProviderCriterionGrade = ProviderCriterionGrade
+  { score :: Double
+  , feedback :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data ProviderGrade = ProviderGrade
+  { feedback :: Text
+  , criteria :: Map Text ProviderCriterionGrade
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data ProviderError
   = ModelNotSelected
-  | PromptProviderNotImplemented
+  | ProviderNotImplemented
   | ProviderConfigurationMissing Text
   | ProviderHttpError Int (Maybe Text)
   | GenerationFailed Text

@@ -13,10 +13,10 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.ByteString.Lazy qualified as BL
 import Essaying.Provider.OpenAiCompatible
-  ( OpenAiProviderConfig (..), buildPromptRequest, buildPromptRequestBody, promptGenerationTask, generatePromptsWith
-  , sendPromptRequest, decodePromptResponse, decodePromptHttpResponse, decodeProviderErrorMessage
+  ( OpenAiProviderConfig (..), buildRequest, buildPromptRequestBody, promptGenerationTask, generatePromptsWith
+  , sendRequest, decodePromptResponse, decodePromptHttpResponse, decodeProviderErrorMessage
   )
-import Essaying.Types.Ai (PromptProviderError (..))
+import Essaying.Types.Ai (ProviderError (..))
 import Essaying.Types.Context (EffectiveContext (..))
 import Network.HTTP.Client
   ( Request (..), RequestBody (RequestBodyLBS), Response, newManager
@@ -34,7 +34,7 @@ tests :: Test
 tests = TestList
   [ TestLabel "custom provider URL and authentication" $ TestCase $
       forM_ ["https://provider.example/v1", "https://provider.example/v1/"] $ \url -> do
-        request <- buildPromptRequest (OpenAiProviderConfig url "test-key") (object [])
+        request <- buildRequest (OpenAiProviderConfig url "test-key") (object [])
         assertEqual "method" "POST" (method request)
         assertEqual "custom host" "provider.example" (host request)
         assertBool "HTTPS" (secure request)
@@ -48,7 +48,7 @@ tests = TestList
             ["文学"] ["Compare evidence and interpretation."] [] Map.empty
           instructions = Just "Discuss \"naïve\" assumptions.\nInclude a counterargument."
           body = buildPromptRequestBody "provider/model-name" context instructions
-      request <- buildPromptRequest (OpenAiProviderConfig "https://provider.example/v1" "test-key") body
+      request <- buildRequest (OpenAiProviderConfig "https://provider.example/v1" "test-key") body
       case requestBody request of
         RequestBodyLBS bytes -> case eitherDecode bytes >>= parseEither parseEnvelope of
           Left err -> assertFailure ("invalid request body: " <> err)
@@ -68,10 +68,10 @@ tests = TestList
   , TestLabel "transport returns the local provider response" $ TestCase $
       testWithApplication (pure (\_ respond -> respond (responseLBS status200 [] "provider reply"))) $ \port -> do
         manager <- newManager defaultManagerSettings
-        request <- buildPromptRequest
+        request <- buildRequest
           (OpenAiProviderConfig (Text.pack ("http://127.0.0.1:" <> show port <> "/v1")) "test-key")
           (object [])
-        result <- sendPromptRequest manager request {proxy = Nothing}
+        result <- sendRequest manager request {proxy = Nothing}
         case result of
           Left err -> assertFailure ("unexpected transport failure: " <> show err)
           Right response -> do
@@ -82,10 +82,10 @@ tests = TestList
         threadDelay 200000
         respond (responseLBS status200 [] "late reply"))) $ \port -> do
         manager <- newManager defaultManagerSettings
-        request <- buildPromptRequest
+        request <- buildRequest
           (OpenAiProviderConfig (Text.pack ("http://127.0.0.1:" <> show port <> "/v1")) "test-key")
           (object [])
-        result <- sendPromptRequest manager request
+        result <- sendRequest manager request
           {proxy = Nothing, responseTimeout = responseTimeoutMicro 20000}
         case result of
           Left (GenerationFailed _) -> pure ()
@@ -174,10 +174,10 @@ withLocalResponse :: Int -> BL.ByteString -> (Response BL.ByteString -> IO ()) -
 withLocalResponse code bytes check =
   testWithApplication (pure (\_ respond -> respond (responseLBS (mkStatus code "Fixture") [] bytes))) $ \port -> do
     manager <- newManager defaultManagerSettings
-    request <- buildPromptRequest
+    request <- buildRequest
       (OpenAiProviderConfig (Text.pack ("http://127.0.0.1:" <> show port <> "/v1")) "test-key")
       (object [])
-    result <- sendPromptRequest manager request {proxy = Nothing}
+    result <- sendRequest manager request {proxy = Nothing}
     case result of
       Left err -> assertFailure ("unexpected transport failure: " <> show err)
       Right response -> check response

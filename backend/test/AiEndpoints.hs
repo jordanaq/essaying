@@ -5,10 +5,11 @@ module AiEndpoints (tests) where
 import ApiClients (aiClients)
 import Control.Exception (bracket)
 import Control.Monad (forM_)
-import Data.Aeson (Value, eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON, Value, eitherDecode, eitherDecodeStrict', encode, object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser, parseEither)
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.List (sort)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TextEncoding
@@ -16,7 +17,7 @@ import Essaying.Provider.OpenAiCompatible (promptGenerationTask, promptResponseF
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, usersRoot, workspaceRoot)
 import Essaying.Types.Account (AccountId (..), AccountProfile (..))
-import Essaying.Types.Ai (PromptRequest (..), PromptResponse (..))
+import Essaying.Types.Ai (PromptRequest (..), PromptResponse (..), GradeRequest (..), GradeResponse (..))
 import Essaying.Types.Context (EffectiveContext (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Network.HTTP.Client (defaultManagerSettings, managerSetProxy, newManager, noProxy)
@@ -25,17 +26,79 @@ import Network.Wai qualified as Wai
 import Network.Wai.Handler.Warp (testWithApplication)
 import Servant ((:<|>) ((:<|>)))
 import Servant.Client (BaseUrl (..), Scheme (Http), mkClientEnv, runClientM)
-import System.Directory (createDirectory, createDirectoryIfMissing, getTemporaryDirectory, removeFile, removePathForcibly)
+import System.Directory (copyFile, createDirectory, createDirectoryIfMissing, getTemporaryDirectory, listDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv, setEnv, unsetEnv)
 import System.FilePath ((</>), takeDirectory)
 import System.IO (hClose, openTempFile)
-import Test.HUnit (Test (..), assertEqual, assertFailure)
+import Test.HUnit (Test (..), assertBool, assertEqual, assertFailure)
 
 tests :: Test
-tests = TestLabel "prompt endpoint through the real application" $ TestList
+tests = TestLabel "AI endpoints through the real application" $ TestList
   [ promptEndpoint "essay context overrides the account model" (Just "context-model") "context-model"
   , promptEndpoint "account preference supplies the model when context has none" Nothing "account-model"
+  , gradeEndpoint
   ]
+
+gradeEndpoint :: Test
+gradeEndpoint = TestLabel "grade endpoint replays the real sample response" $ TestCase $ withCache $ \cache -> do
+  let fixtures = "test/fixtures/provider"
+      account = accountRoot (usersRoot (CacheRoot cache)) (AccountId "grade-sample")
+      WorkspaceRoot workspace = workspaceRoot account
+      expectedFiles = ["context.json", "Religion/essay.md", "Religion/prompt.md"]
+  recorded <- BL.readFile (fixtures </> "gpt-6.1-sol-grade.response.json")
+  recordedRequest <- readFixture (fixtures </> "gpt-6.1-sol-grade.request.json")
+  expected <- readFixture (fixtures </> "gpt-6.1-sol-grade.expected.json")
+  writeBytes (profileRoot account) $ encode $
+    AccountProfile (AccountId "grade-sample") "Grade sample" (Just "account-fallback-must-not-win")
+  forM_ expectedFiles $ \relative -> do
+    createDirectoryIfMissing True (takeDirectory (workspace </> relative))
+    copyFile (fixtures </> "grade-workspace" </> relative) (workspace </> relative)
+  originalFiles <- mapM (BL.readFile . (workspace </>)) expectedFiles
+  received <- newIORef []
+  let provider request respond = do
+        bytes <- Wai.strictRequestBody request
+        modifyIORef' received ((Wai.requestMethod request, Wai.rawPathInfo request, Wai.requestHeaders request, bytes) :)
+        respond $ Wai.responseLBS status200 [("Content-Type", "application/json")] recorded
+  testWithApplication (pure provider) $ \providerPort ->
+    withEnvironment
+      ([ ("HESSAY_CACHE", Just cache)
+       , ("OPENAI_BASE_URL", Just ("http://127.0.0.1:" <> show providerPort <> "/v1/"))
+       , ("OPENAI_API_KEY", Just "test-key")
+       ] <> [(key, Nothing) | key <- ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]]) $
+      testWithApplication (pure app) $ \appPort -> do
+        manager <- newManager (managerSetProxy noProxy defaultManagerSettings)
+        let environment = mkClientEnv manager (BaseUrl Http "127.0.0.1" appPort "")
+            _ :<|> grade = aiClients "grade-sample"
+        result <- runClientM (grade (GradeRequest "Religion")) environment
+        case result of
+          Left err -> assertFailure ("grade endpoint failed: " <> show err)
+          Right (GradeResponse overall feedback criteria) -> do
+            let GradeResponse expectedOverall expectedFeedback expectedCriteria = expected
+            assertBool "weighted overall score is 79.3/100"
+              (not (isNaN overall || isInfinite overall) && abs (overall - expectedOverall) < 1e-10)
+            assertEqual "real overall feedback is preserved" expectedFeedback feedback
+            assertEqual "real criterion scores and feedback, with application-calculated weights" expectedCriteria criteria
+        requests <- readIORef received
+        case requests of
+          [(method, path, headers, bytes)] -> do
+            assertEqual "one provider POST" "POST" method
+            assertEqual "provider URL includes its API prefix" "/v1/chat/completions" path
+            assertEqual "only fake credentials are sent" (Just "Bearer test-key") (lookup "Authorization" headers)
+            assertEqual "JSON request" (Just "application/json") (lookup "Content-Type" headers)
+            assertEqual "entire outgoing request matches the real smoke request"
+              (Right recordedRequest) (eitherDecode bytes :: Either String Value)
+          _ -> assertFailure "expected exactly one grading provider request"
+        assertEqual "saved context, draft, and assignment are unchanged" originalFiles
+          =<< mapM (BL.readFile . (workspace </>)) expectedFiles
+        entries <- listDirectory (workspace </> "Religion")
+        assertEqual "grading creates no files in the essay" ["essay.md", "prompt.md"] (sort entries)
+
+readFixture :: FromJSON a => FilePath -> IO a
+readFixture path = do
+  bytes <- BL.readFile path
+  case eitherDecode bytes of
+    Left err -> assertFailure ("invalid test fixture: " <> err) >> fail "invalid fixture"
+    Right value -> pure value
 
 promptEndpoint :: String -> Maybe Text -> Text -> Test
 promptEndpoint label contextModel expectedModel = TestLabel label $ TestCase $ withCache $ \cache -> do

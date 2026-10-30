@@ -3,12 +3,23 @@ name:               haskell-essaying
 version:            0.1.0.0
 build-type:         Simple
 extra-source-files:
+    examples/grade-smoke/BuildGradeRequest.hs
+    examples/grade-smoke/README.md
+    examples/grade-smoke/workspace/context.json
+    examples/grade-smoke/workspace/Religion/essay.md
+    examples/grade-smoke/workspace/Religion/prompt.md
     data/sample/context.json
     data/sample/History/context.json
     data/sample/History/French-Revolution/context.json
     test/fixtures/provider/README.md
     test/fixtures/provider/gpt-6.1-sol-prompt-options.response.json
     test/fixtures/provider/gpt-6.1-sol-prompt-options.expected.json
+    test/fixtures/provider/gpt-6.1-sol-grade.request.json
+    test/fixtures/provider/gpt-6.1-sol-grade.response.json
+    test/fixtures/provider/gpt-6.1-sol-grade.expected.json
+    test/fixtures/provider/grade-workspace/context.json
+    test/fixtures/provider/grade-workspace/Religion/essay.md
+    test/fixtures/provider/grade-workspace/Religion/prompt.md
 
 common warnings
   ghc-options:      -Wall
@@ -71,6 +82,8 @@ test-suite haskell-essaying-test
   other-modules:
       ApiClients
     , AiEndpoints
+    , GradeNormalization
+    , GradeProvider
     , ContextAcceptance
     , ProviderRequests
     , WorkspaceDiscovery
