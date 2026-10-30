@@ -37,6 +37,40 @@ not authentication; no `X-Account-Id` header is required.
 | PATCH | `/accounts/:accountId` | 200, profile updated with `UpdateAccountRequest` |
 | DELETE | `/accounts/:accountId` | 204 |
 
+Create an account with a body such as:
+
+```json
+{"displayName":"alice","preferredModel":"your-provider-model-id"}
+```
+
+Display names must be nonblank and contain only alphanumeric characters,
+hyphens, or underscores after trimming. The ID is derived from the name's slug;
+an existing account directory returns 409. Profiles encode `accountId` as an
+object rather than a string:
+
+```json
+{
+  "accountId": {"unAccountId":"alice"},
+  "displayName":"alice",
+  "preferredModel":"your-provider-model-id"
+}
+```
+
+PATCH accepts optional `displayName` and `preferredModel`. Omitted or null fields
+preserve existing values; the endpoint cannot clear the preferred model. A name
+change preserves the account ID. DELETE removes the entire account directory,
+including the workspace. The frontend currently supports account creation and
+selection/logout; profile management remains future work.
+
+A missing, malformed, or mismatched profile returns 404 and can fail the entire
+account listing. A missing `users/` directory or other filesystem failure can
+propagate as a server error. Full account-ID/symlink boundary review and uniform
+filesystem failure handling remain E11; these routes do not yet establish
+complete account isolation.
+
+Health returns `{"status":"ok"}`. Readiness returns `message` and empty
+`sampleContext`; neither endpoint checks user storage or provider access.
+
 ## Workspace and essay routes
 
 Base: `/api/v1/accounts/:accountId/workspace`.
@@ -170,7 +204,9 @@ non-streaming Chat Completions, and strict JSON-schema output. Select the model
 in effective context or, as fallback, account preferences. Providers and models
 must support the required endpoint and schema capability.
 
-Calls are bounded and return a complete validated JSON result or an error.
+Calls use a 60-second response timeout and a 120-second overall deadline,
+disable redirects, and have no automatic application retry loop. They return
+a complete validated JSON result or an error.
 Provider failures use application-owned corrective messages without raw provider
 diagnostics or credentials. Missing model/invalid grading inputs return 422;
 configuration errors return 500; upstream/invalid-response failures generally

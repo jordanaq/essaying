@@ -73,12 +73,12 @@ are not implemented. See [the API reference](BACKEND_API_SKETCH.md) for route ex
 - Backend grading loads the saved draft, saved assignment, and resolved context
   as separate inputs. Without an assignment it grades using context and rubric.
   Prompt generation uses context and optional instructions without loading the
-  draft, returning candidates without saving them. E07 will add frontend
-  candidate adoption into the assignment editor and normal prompt saving.
+  draft, returning candidates without saving them. The frontend supports
+  candidate adoption into the assignment editor followed by explicit prompt saving.
 - Draft and prompt have separate dirty/saving/error state. Successful draft
   saves must not replace unsaved prompt text from the response, or vice versa.
-  Real frontend AI integration must require relevant pending edits to be saved
-  or explicitly discarded.
+  Frontend grading requires pending edits to be saved or explicitly discarded;
+  candidate adoption confirms replacement of unsaved assignment text.
 
 ## Completion record
 
@@ -103,11 +103,15 @@ update. Existing provider samples and recorded-response fixtures already use
 
 ## Remaining feature work
 
-E07 adds frontend prompt generation, candidate selection, and adoption into the
-assignment editor; E08/E09 retain integrated grading/results acceptance. The
-backend already loads saved draft/assignment/context separately. E10 retains
-broader editor polish, E11 broader filesystem hardening, E12 full-app workflow
-checks, and E13 broader setup/documentation review. These do not reopen migration.
+E07 prompt generation/adoption, E08/E09 grading/results, and E10 editor
+reliability/polish are complete with user acceptance on 2026-10-30. Latest recorded
+frontend verification passed 47 component cases, 39 affected mocked-API browser
+scenarios, and a production build with zero Svelte diagnostics.
+
+E11 filesystem/API hardening is next. E12 retains complete isolated-cache,
+restart, account-isolation, and provider workflow checks; E13 retains fresh-setup
+validation and final documentation reconciliation after those checks. These do
+not reopen migration.
 
 Rename/move, attachments, reusable prompts, optimistic concurrency, and streaming
 remain later scope. The deferred save/reload acknowledgment issue stays L11.

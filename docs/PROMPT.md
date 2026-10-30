@@ -2,7 +2,12 @@
 
 Date: 2026-06-24
 
-This document reformats the prior research into a readable project brief. Use it as the primary knowledge base for follow-up questions. If a question is not covered here, say so directly instead of guessing.
+This is the historical research brief, retained for design background. The
+overrides below supersede conflicting requirements in the original research.
+For current behavior and setup, start with [README.md](../README.md), the
+[API contract](BACKEND_API_SKETCH.md), and the
+[context contract](CONTEXT_DESIGN.md). The original roadmap and dependency
+recommendations below are historical, rather than an implementation status report.
 
 ## Current provider scope (2026-10-27)
 
@@ -13,9 +18,10 @@ is not required. Provider connection settings stay in the backend environment;
 credentials never belong in browser code, context files, logs, or source control.
 AI actions send relevant essay text and context to the selected provider; local
 editing and saving do not need provider access. Provider capabilities must be
-checked for the requested operation. See `BOARD.md` E06 for current acceptance
-criteria and `CONTEXT_DESIGN.md` for the current JSON context contract, which
-supersedes the older YAML examples below.
+checked for the requested operation. Provider integration is implemented; see
+the API contract for supported operations and limitations, and
+`CONTEXT_DESIGN.md` for the JSON context contract, which supersedes the older
+YAML examples below.
 
 ## Current MVP response scope (2026-10-27)
 

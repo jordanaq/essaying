@@ -1,18 +1,9 @@
 # Frontend
 
-Minimal interactive frontend for the essay platform.
-
-## Stack
-
-- Svelte + TypeScript + Vite
-- Shoelace Web Components for out-of-the-box UI
-- No heavy architecture required to start
-
-## Why this setup
-
-- Very low frontend maintenance
-- Feature-rich components immediately
-- Functional/declarative style without complex boilerplate
+Svelte 5 and TypeScript UI for local accounts, essay directories, inherited
+context, prompt generation, and grading. Vite handles development/builds,
+Shoelace supplies UI components, Vitest checks components, and Playwright checks
+browser workflows.
 
 ## Run
 
@@ -80,3 +71,28 @@ for Chat Completions and strict JSON-schema output. The saved context model
 takes precedence over the account preference; the editor toolbar Model selector
 is currently a local UI placeholder and does not change AI requests. Automatic
 endpoint-specific discovery is tracked as L13 on the local completion board.
+
+
+## Checks
+
+From a repository-root Nix development shell:
+
+```bash
+(cd frontend && npm ci)
+(cd frontend && npm test)
+(cd frontend && npm run build)
+```
+
+`npm run build` runs Svelte/TypeScript checking before producing `frontend/dist`.
+For browser checks, stop any backend on port 8080, then use an isolated cache:
+
+```bash
+HESSAY_CACHE="$(mktemp -d /tmp/essaying-e2e.XXXXXX)" bash -c 'cd frontend && npm run e2e'
+```
+
+Playwright starts the backend and a temporary frontend on 4175, with an optional
+`PLAYWRIGHT_FRONTEND_PORT` override. Outside CI, an existing backend is reused
+and retains its own cache setting. Live account/context scenarios mutate test
+accounts; the editor/grading scenarios use mock responses. See the
+[root verification guide](../README.md#build-and-verify) for prerequisites and
+limits of this coverage.
