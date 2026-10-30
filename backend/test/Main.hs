@@ -1,10 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
 module Main where
 
+import ApiClients
+  ( healthClient, readyClient, listAccountsClient, createAccountClient
+  , accountByIdClient, workspaceClients, essayClients, contextClients
+  )
 import ContextErrors qualified
 import ContextHandlers qualified
 import ProviderRequests qualified
@@ -16,9 +19,6 @@ import Control.Monad (when)
 import Data.Aeson (decode, encode, toJSON)
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
-import Data.Proxy (Proxy (..))
-import Data.Text (Text)
-import Essaying.API.V1 (Api)
 import Essaying.Context (applyLayer, emptyEffectiveContext)
 import Essaying.Handler.Health (healthResponse, readyResponseFromContext)
 import Essaying.Persistence.Account (createAccountProfile, readAccountProfile)
@@ -39,9 +39,9 @@ import Essaying.Persistence.Workspace
   )
 import Essaying.Server (app)
 import Essaying.Storage (accountRoot, profileRoot, resolveCacheRoot, usersRoot, workspaceRoot)
-import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..), CreateAccountRequest (..), UpdateAccountRequest)
+import Essaying.Types.Account (AccountId (..), AccountProfile (..), CreateAccountProfileResult (..), CreateAccountRequest (..))
 import Essaying.Types.Context
-  ( ContextWriteRequest (..), ContextLayer, DeleteContextRequest (..)
+  ( ContextWriteRequest (..), DeleteContextRequest (..)
   , ContextLayerError (..)
   , EffectiveContext (..)
   , EffectiveContextError (..)
@@ -50,19 +50,15 @@ import Essaying.Types.Context
   , RubricOverride (..)
   , ScalarOverride (..)
   )
-import Essaying.Types.Ai (PromptRequest (..), PromptResponse (..), GradeRequest (..), GradeResponse (..))
 import Essaying.Types.Context qualified as ContextType (ContextLayer (..))
 import Essaying.Types.Health (HealthResponse (..), ReadyResponse (..))
 import Essaying.Types.Storage (CacheRoot (..), WorkspaceRoot (..))
 import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryRequest
-  , CreateWorkspaceDirectoryResult (..)
-  , CreateWorkspaceEssayRequest
+  ( CreateWorkspaceDirectoryResult (..)
   , CreateWorkspaceEssayResult (..)
   , WorkspaceEssayContent (..)
   , WorkspaceNode (..)
   , WorkspaceNodeType (..)
-  , WorkspaceTreeResponse
   , SaveWorkspaceEssayRequest (SaveWorkspaceEssayRequest)
   , WorkspacePathError (..)
   , WorkspaceDeleteResult (..)
@@ -71,9 +67,7 @@ import Network.HTTP.Client (defaultManagerSettings, newManager)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Servant.Client
   ( BaseUrl (..)
-  , ClientM
   , Scheme (Http)
-  , client
   , mkClientEnv
   , runClientM
   )
@@ -84,27 +78,6 @@ import System.Exit (exitFailure)
 import System.FilePath ((</>), normalise, takeDirectory)
 import Test.HUnit (Counts (..), Test (..), assertEqual, assertFailure, runTestTT)
 import qualified Data.ByteString.Lazy as BL
-
-healthClient :: ClientM HealthResponse
-readyClient :: ClientM ReadyResponse
-listAccountsClient :: ClientM [AccountProfile]
-createAccountClient :: CreateAccountRequest -> ClientM AccountProfile
-type WorkspaceClientRoutes =
-  ClientM WorkspaceTreeResponse
-    :<|> ([Text] -> (ClientM WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> ClientM WorkspaceEssayContent) :<|> ClientM NoContent)))
-    :<|> (CreateWorkspaceEssayRequest -> ClientM WorkspaceEssayContent)
-    :<|> ([Text] -> ClientM NoContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> ClientM WorkspaceNode)
-    :<|> ((FilePath -> ClientM EffectiveContext)
-      :<|> (FilePath -> ClientM ContextLayer)
-      :<|> (ContextWriteRequest -> ClientM ContextLayer)
-      :<|> (ContextWriteRequest -> ClientM ContextLayer)
-      :<|> (DeleteContextRequest -> ClientM NoContent))
-    :<|> ((PromptRequest -> ClientM PromptResponse)
-      :<|> (GradeRequest -> ClientM GradeResponse))
-
-accountByIdClient :: Text -> (ClientM AccountProfile :<|> (UpdateAccountRequest -> ClientM AccountProfile) :<|> ClientM NoContent :<|> WorkspaceClientRoutes)
-(healthClient :<|> readyClient :<|> (listAccountsClient :<|> createAccountClient :<|> accountByIdClient)) = client (Proxy @Api)
 
 main :: IO ()
 main = do
@@ -285,9 +258,8 @@ workspaceDeleteEndpoints = TestCase $
       testWithApplication (pure app) $ \port -> do
         manager <- newManager defaultManagerSettings
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
-            _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "delete-test"
-            _ :<|> essayRoutes :<|> _ :<|> deleteDirectory :<|> _ :<|> _ = workspaceRoutes
-            _ :<|> (_ :<|> deleteEssay) = essayRoutes ["Remove Me"]
+            _ :<|> _ :<|> _ :<|> deleteDirectory :<|> _ :<|> _ :<|> _ = workspaceClients "delete-test"
+            _ :<|> (_ :<|> deleteEssay) = essayClients "delete-test" ["Remove Me"]
 
         essayResult <- runClientM deleteEssay env
         case essayResult of
@@ -768,9 +740,7 @@ contextApiMutations = TestCase $
       testWithApplication (pure app) $ \port -> do
         manager <- newManager defaultManagerSettings
         let env = mkClientEnv manager (BaseUrl Http "127.0.0.1" port "")
-            _ :<|> _ :<|> _ :<|> workspaceRoutes = accountByIdClient "contextapi"
-            _ :<|> _ :<|> _ :<|> _ :<|> _ :<|> contextRoutes :<|> _ = workspaceRoutes
-            _ :<|> _ :<|> createLayer :<|> updateLayer :<|> deleteLayer = contextRoutes
+            _ :<|> _ :<|> createLayer :<|> updateLayer :<|> deleteLayer = contextClients "contextapi"
             layer = ContextType.ContextLayer Nothing Nothing Nothing Nothing Nothing Nothing Nothing
             updated = layer {ContextType.title = Just (SetScalar "Updated")}
             root = workspaceRoot (accountRoot (usersRoot (CacheRoot cachePath)) (AccountId "contextapi"))

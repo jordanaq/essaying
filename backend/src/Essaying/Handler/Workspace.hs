@@ -5,7 +5,7 @@ module Essaying.Handler.Workspace
   )
 where
 
-import Essaying.API.V1 (AiApi, ContextApi)
+import Essaying.API.V1 (EssayApi, WorkspaceApi)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (IOException, try)
 import Essaying.Handler.ContextError (contextError)
@@ -40,15 +40,7 @@ import Essaying.Types.Workspace
 import Essaying.Types.Storage (WorkspaceRoot)
 import Servant (Server, Handler, NoContent (NoContent), err400, err403, err404, err409, err500, throwError, (:<|>) (..))
 
-workspaceHandler ::
-  Text ->
-  Handler WorkspaceTreeResponse
-    :<|> ([Text] -> (Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)))
-    :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
-    :<|> ([Text] -> Handler NoContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
-    :<|> Server ContextApi
-    :<|> Server AiApi
+workspaceHandler :: Text -> Server WorkspaceApi
 workspaceHandler accountIdText =
   listWorkspaceTreeHandler accountIdText
     :<|> essayRoutes accountIdText
@@ -58,7 +50,7 @@ workspaceHandler accountIdText =
     :<|> contextHandler (resolveContextWorkspaceRoot accountIdText)
     :<|> aiHandler (AccountId accountIdText)
 
-essayRoutes :: Text -> [Text] -> Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)
+essayRoutes :: Text -> [Text] -> Server EssayApi
 essayRoutes accountIdText essayPath =
   loadWorkspaceEssayHandler accountIdText essayPath
     :<|> ( saveWorkspaceEssayHandler accountIdText essayPath

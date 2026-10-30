@@ -6,7 +6,7 @@ module Essaying.Handler.Account
 where
 
 import Data.Text (Text)
-import Essaying.API.V1 (AiApi, ContextApi)
+import Essaying.API.V1 (AccountApi, AccountsApi)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
 import Essaying.Handler.Workspace (workspaceHandler)
@@ -26,29 +26,9 @@ import Essaying.Types.Account
   , CreateAccountRequest (..)
   , UpdateAccountRequest (..)
   )
-import Essaying.Types.Workspace
-  ( CreateWorkspaceDirectoryRequest
-  , CreateWorkspaceEssayRequest
-  , WorkspaceEssayContent
-  , WorkspaceNode
-  , WorkspaceTreeResponse
-  , SaveWorkspaceEssayRequest
-  )
 import Servant (Server, Handler, NoContent (NoContent), err400, err404, err409, throwError, (:<|>) (..))
 
-type WorkspaceRoutes =
-  Handler WorkspaceTreeResponse
-    :<|> ([Text] -> (Handler WorkspaceEssayContent :<|> ((SaveWorkspaceEssayRequest -> Handler WorkspaceEssayContent) :<|> Handler NoContent)))
-    :<|> (CreateWorkspaceEssayRequest -> Handler WorkspaceEssayContent)
-    :<|> ([Text] -> Handler NoContent)
-    :<|> (CreateWorkspaceDirectoryRequest -> Handler WorkspaceNode)
-    :<|> Server ContextApi
-    :<|> Server AiApi
-
-accountHandler ::
-  Handler [AccountProfile]
-    :<|> (CreateAccountRequest -> Handler AccountProfile)
-    :<|> (Text -> (Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent :<|> WorkspaceRoutes))
+accountHandler :: Server AccountsApi
 accountHandler =
   listAccountsHandler
     :<|> createAccountHandler
@@ -91,7 +71,7 @@ deleteAccountHandler accountIdText = do
     then pure NoContent
     else throwError err404
 
-accountByIdHandler :: Text -> Handler AccountProfile :<|> (UpdateAccountRequest -> Handler AccountProfile) :<|> Handler NoContent :<|> WorkspaceRoutes
+accountByIdHandler :: Text -> Server AccountApi
 accountByIdHandler accountIdText =
   getAccountProfileHandler accountIdText
     :<|> updateAccountProfileHandler accountIdText

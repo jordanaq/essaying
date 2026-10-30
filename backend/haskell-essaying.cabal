@@ -69,7 +69,8 @@ test-suite haskell-essaying-test
   hs-source-dirs:   test, src
   main-is:          Main.hs
   other-modules:
-      ContextAcceptance
+      ApiClients
+    , ContextAcceptance
     , ProviderRequests
     , WorkspaceDiscovery
     , ContextErrors
