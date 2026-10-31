@@ -36,6 +36,7 @@ Frontend will run on http://127.0.0.1:4173 and proxies `/api` to backend on `127
 - API handshake button for `/api/v1/ready`
 - Folder context editor for title, audience, model, tags, instructions, grading directions, and weighted rubric criteria
 - Context inheritance controls (inherit, set/clear, append/replace, merge/replace) and a saved effective-context preview for the selected essay
+- Context error messages include a collapsed Details section with File and Field when available (L09)
 - Create, update, and remove folder context layers through `/api/v1/accounts/:accountId/workspace/context`
 
 Essays are directories containing a required `essay.md` draft and optional

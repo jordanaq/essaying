@@ -357,8 +357,8 @@ line/column coordinates are not currently emitted. For example:
 }
 ```
 
-The UI currently displays error messages; file/field details are available in
-the HTTP response but are not rendered by the panel (post-MVP L09). The real
+The UI displays error messages with a collapsed-by-default Details section for
+File and Field lines when the response supplies them (L09). Missing details are omitted. The real
 grading button requires a successful context resolution for the current account
 and essay; loading and errors disable it. Backend prompt and grading handlers
 independently resolve and validate context before calling a provider.
@@ -457,8 +457,8 @@ without discarding unsaved layer edits. Grading is gated on successful resolutio
 for the current account/essay, including while the Context panel is collapsed.
 Late responses from old selections are ignored. Context errors leave essay
 editing/saving usable; retry after repair restores grading eligibility. Error
-messages are displayed, but file/field display (L09) and in-app repair of malformed
-layers (L08) remain post-MVP.
+messages include available file/field details (L09). In-app repair of malformed
+layers (L08) remains post-MVP.
 
 Each backend LLM request resolves context again and holds one snapshot for
 that operation, independently of any frontend preview. Prompt generation sends

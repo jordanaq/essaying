@@ -20,10 +20,20 @@ export type EffectiveContext = {
   rubric: Record<string, Criterion>;
 };
 
+export type ContextErrorDetails = { path?: string; field?: string };
+export type ContextErrorInfo = { message: string; details: ContextErrorDetails };
+
 export class ContextApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public details: ContextErrorDetails = {}) {
     super(message);
   }
+}
+
+export function contextErrorInfo(error: unknown): ContextErrorInfo {
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    details: error instanceof ContextApiError ? error.details : {}
+  };
 }
 
 export async function contextRequest<T>(accountId: string, path: string, options: {
@@ -48,8 +58,16 @@ export async function contextRequest<T>(accountId: string, path: string, options
   if (!response.ok) {
     const body = await response.text();
     let message = body || `HTTP ${response.status}`;
-    try { message = JSON.parse(body).error?.message ?? message; } catch { /* Plain text error. */ }
-    throw new ContextApiError(response.status, message);
+    const details: ContextErrorDetails = {};
+    try {
+      const error = JSON.parse(body)?.error;
+      if (typeof error?.message === "string" && error.message.trim()) message = error.message;
+      for (const key of ["path", "field"] as const) {
+        const value = error?.details?.[key];
+        if (typeof value === "string" && value.trim()) details[key] = value;
+      }
+    } catch { /* Plain text error. */ }
+    throw new ContextApiError(response.status, message, details);
   }
   return response.status === 204 ? undefined as T : await response.json() as T;
 }

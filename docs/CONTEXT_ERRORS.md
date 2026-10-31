@@ -89,15 +89,19 @@ remains E11.
 
 ## Frontend behavior and remaining work
 
-The Context panel currently displays `error.message`. File/field details are
-available in the Network response but are not rendered by the panel. Failed
+The Context panel displays `error.message` and, when supplied, `details.path`
+and `details.field` as selectable File and Field lines in a collapsed-by-default
+Details section beneath it (L09).
+Layer reads, mutations, inherited-list failures, and effective previews retain
+these details; absent or invalid details are omitted. Reloading, retrying, and
+changing selection clear the corresponding old error details. Failed
 effective previews have `Retry preview`; layer/inherited-list reads have `Reload`.
 `Refresh preview` rereads saved effective context without discarding layer edits.
 The Grade essay action requires successful resolution for the current account and
 essay; loading and failures disable it, and retry after repair restores it.
 Selection changes invalidate eligibility and late responses are ignored.
-Collapsing the Context panel preserves resolution state. Rendering file/field
-details (L09) and in-app malformed-layer repair (L08) remain post-MVP.
+Collapsing the Context panel preserves resolution state.
+In-app malformed-layer repair (L08) remains post-MVP.
 
 Draft and assignment loading/editing/saving remain independent of context
 resolution. Backend prompt and grading handlers independently resolve and

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { providerModels } from "./provider-models";
-  import { contextRequest, ContextApiError, type ContextLayer } from "./context-api";
+  import { contextRequest, ContextApiError, contextErrorInfo, type ContextErrorInfo, type ContextLayer } from "./context-api";
+  import ContextError from "./ContextError.svelte";
   import { createContextPreview } from "./context-preview";
 
   export let preview = createContextPreview();
@@ -16,7 +17,7 @@
   let lists: ListField[] = [];
   let inherited: Record<ListField["key"], string[]> = { tags: [], instructions: [], grading_directions: [] };
   let inheritedLoading = false;
-  let inheritedError = "";
+  let inheritedError: ContextErrorInfo | null = null;
   let rubricMode = "inherit";
   let criteria: RubricRow[] = [];
   let scope = "";
@@ -24,7 +25,7 @@
   let exists = false;
   let loading = false;
   export let busy = false;
-  let error = "";
+  let error: ContextErrorInfo | null = null;
   let notice = "";
   export let dirty = false;
   let confirmDelete = false;
@@ -77,7 +78,8 @@
     const controller = new AbortController();
     layerController = controller;
     loading = true;
-    error = notice = "";
+    error = null;
+    notice = "";
     exists = false;
     populate({});
     void loadInherited(account, path, controller);
@@ -88,7 +90,7 @@
       exists = true;
     } catch (err) {
       if (controller.signal.aborted) return;
-      if (!(err instanceof ContextApiError && err.status === 404)) error = String(err instanceof Error ? err.message : err);
+      if (!(err instanceof ContextApiError && err.status === 404)) error = contextErrorInfo(err);
     } finally {
       if (!controller.signal.aborted) loading = false;
     }
@@ -96,7 +98,7 @@
 
   async function loadInherited(account: string, path: string, controller: AbortController) {
     inherited = { tags: [], instructions: [], grading_directions: [] };
-    inheritedError = "";
+    inheritedError = null;
     const directories = path.split("/").slice(0, -1);
     inheritedLoading = directories.length > 0;
     try {
@@ -120,7 +122,7 @@
       }
       inherited = resolved;
     } catch (err) {
-      if (!controller.signal.aborted) inheritedError = err instanceof Error ? err.message : String(err);
+      if (!controller.signal.aborted) inheritedError = contextErrorInfo(err);
     } finally {
       if (!controller.signal.aborted) inheritedLoading = false;
     }
@@ -154,7 +156,8 @@
     const controller = new AbortController();
     mutationController = controller;
     busy = true;
-    error = notice = "";
+    error = null;
+    notice = "";
     try {
       const layer = remove ? undefined : buildLayer();
       preview.cancel();
@@ -168,7 +171,7 @@
       void preview.load(accountId, essayPath);
     } catch (err) {
       if (!controller.signal.aborted) {
-        error = err instanceof Error ? err.message : String(err);
+        error = contextErrorInfo(err);
         void preview.load(accountId, essayPath);
       }
     } finally {
@@ -188,7 +191,10 @@
     </select>
   </label>
   <p class="context-hint">{essayScope ? "Settings apply to this essay. Inherit keeps the parent setting." : "Settings apply to every essay in this folder and its descendants. Inherit keeps the parent setting."}</p>
-  {#if error}<p role="alert" class="context-error">{error}</p>{/if}
+  {#if error}<ContextError {error} />{/if}
+  {#if inheritedError && lists.some((field) => field.mode === "AppendList")}
+    <ContextError error={{ ...inheritedError, message: `Unable to load inherited items: ${inheritedError.message}` }} />
+  {/if}
   {#if notice}<p role="status" class="context-notice">{notice}</p>{/if}
   {#if loading}
     <p role="status">Loading context…</p>
@@ -218,7 +224,7 @@
               {#if field.mode === "AppendList"}
                 <label class="field-value list-value">Inherited {field.label.toLowerCase()} (read only)
                   <textarea class="inherited-value" aria-label={`Inherited ${field.label.toLowerCase()}`} readonly rows="3"
-                    value={inheritedLoading ? "Loading inherited items…" : inheritedError ? `Unable to load inherited items: ${inheritedError}` : inherited[field.key].join("\n")}
+                    value={inheritedLoading ? "Loading inherited items…" : inheritedError ? `Unable to load inherited items: ${inheritedError.message}` : inherited[field.key].join("\n")}
                     placeholder="No inherited items"></textarea>
                 </label>
                 <label class="field-value current-context-label" for={`context-${field.key}-value`}>Additions for this context</label>
@@ -265,7 +271,7 @@
     {/if}
     {#if !essayPath}<p class="context-hint">Select an essay to see its combined settings.</p>
     {:else if effectiveLoading}<p role="status">Resolving context…</p>
-    {:else if effectiveError}<p role="alert" class="context-error">{effectiveError}</p><button type="button" disabled={busy} on:click={() => preview.load(accountId, essayPath)}>Retry preview</button>
+    {:else if effectiveError}<ContextError error={effectiveError} /><button type="button" disabled={busy} on:click={() => preview.load(accountId, essayPath)}>Retry preview</button>
     {:else if effective}
       <p class="context-hint">Saved settings from root through this essay. {essayPath.join("/")}</p>
       <dl>{#each ["title", "audience", "model"] as key}<div><dt>{key}</dt><dd>{effective[key as "title" | "audience" | "model"] ?? "Not set"}</dd></div>{/each}</dl>
@@ -305,7 +311,6 @@
   .context-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
   .primary { background: var(--ctp-rosewater); color: var(--app-primary-fg); border-color: var(--ctp-rosewater); font-weight: 600; }
   .text-button { background: transparent; color: var(--ctp-subtext1); }
-  .context-error { color: var(--ctp-text); border-left: 3px solid #f5a97f; padding-left: 10px; overflow-wrap: anywhere; }
   .context-notice { border-left: 3px solid var(--ctp-rosewater); padding-left: 10px; }
   .delete-confirm { margin-top: 12px; padding: 12px; border: 1px solid var(--ctp-rosewater); border-radius: 8px; } .delete-confirm button { margin-right: 8px; }
   .effective-context { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--ctp-surface2); }

@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import { contextRequest, type EffectiveContext } from "./context-api";
+import { contextRequest, contextErrorInfo, type ContextErrorInfo, type EffectiveContext } from "./context-api";
 
 export function contextSelection(accountId: string | null, essayPath: string[] | null): string {
   return JSON.stringify([accountId, essayPath]);
@@ -9,16 +9,16 @@ type Preview = {
   selection: string;
   status: "idle" | "loading" | "ready" | "error";
   context: EffectiveContext | null;
-  error: string;
+  error: ContextErrorInfo | null;
 };
 
 export function createContextPreview() {
-  const { subscribe, set } = writable<Preview>({ selection: "", status: "idle", context: null, error: "" });
+  const { subscribe, set } = writable<Preview>({ selection: "", status: "idle", context: null, error: null });
   let controller: AbortController | undefined;
 
   function cancel() {
     controller?.abort();
-    set({ selection: "", status: "idle", context: null, error: "" });
+    set({ selection: "", status: "idle", context: null, error: null });
   }
 
   async function load(accountId: string, essayPath: string[] | null) {
@@ -26,15 +26,15 @@ export function createContextPreview() {
     const request = new AbortController();
     controller = request;
     const selection = contextSelection(accountId, essayPath);
-    set({ selection, status: essayPath ? "loading" : "idle", context: null, error: "" });
+    set({ selection, status: essayPath ? "loading" : "idle", context: null, error: null });
     if (!essayPath) return;
     try {
       const context = await contextRequest<EffectiveContext>(accountId, essayPath.join("/"), {
         effective: true, signal: request.signal
       });
-      if (!request.signal.aborted) set({ selection, status: "ready", context, error: "" });
+      if (!request.signal.aborted) set({ selection, status: "ready", context, error: null });
     } catch (error) {
-      if (!request.signal.aborted) set({ selection, status: "error", context: null, error: error instanceof Error ? error.message : String(error) });
+      if (!request.signal.aborted) set({ selection, status: "error", context: null, error: contextErrorInfo(error) });
     }
   }
 

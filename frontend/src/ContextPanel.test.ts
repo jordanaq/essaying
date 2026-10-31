@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ContextPanel from "./ContextPanel.svelte";
 import type { ContextLayer, EffectiveContext } from "./context-api";
@@ -36,6 +36,78 @@ async function changeMode(label: string, value: string) {
 
 describe("Writing context", () => {
   beforeEach(() => vi.restoreAllMocks());
+
+  it("shows the failing layer file and field, then clears them on reload", async () => {
+    const fetchMock = mockApi();
+    fetchMock.mockImplementation(async () => json({ error: {
+      message: "Invalid weight.", details: { path: "History & Art/context.json", field: 'rubric.contents["use.of.sources"].weight' }
+    } }, 422));
+    render(ContextPanel, { ...props, essayPath: null });
+    const alert = await screen.findByRole("alert");
+    const details = within(alert).getByText("Details").closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    await fireEvent.click(within(alert).getByText("Details"));
+    expect(details).toHaveAttribute("open");
+    expect(within(alert).getByText("File")).toBeInTheDocument();
+    expect(within(alert).getByText("History & Art/context.json")).toBeInTheDocument();
+    expect(within(alert).getByText('rubric.contents["use.of.sources"].weight')).toBeInTheDocument();
+    mockApi();
+    await fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("shows preview details and removes them when switching accounts, ignoring a late failure", async () => {
+    let resolveOld!: (response: Response) => void;
+    const fetchMock = mockApi();
+    fetchMock.mockImplementation(async (input) => String(input).includes("/effective")
+      ? json({ error: { message: "Invalid ancestor.", details: { path: "context.json", field: "instructions.contents[1]" } } }, 422)
+      : json({}));
+    const { rerender } = render(ContextPanel, { ...props, accountId: "alice" });
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("context.json")).toBeInTheDocument();
+    expect(within(alert).getByText("instructions.contents[1]")).toBeInTheDocument();
+    fetchMock.mockImplementation((input) => String(input).includes("alice") && String(input).includes("/effective")
+      ? new Promise<Response>((resolve) => { resolveOld = resolve; })
+      : Promise.resolve(String(input).includes("/effective") ? json(effective) : json({})));
+    await fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await rerender({ ...props, accountId: "bob" });
+    await screen.findByText("History Essays");
+    resolveOld(json({ error: { message: "Old failure.", details: { path: "Old/context.json" } } }, 422));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.queryByText("Old/context.json")).not.toBeInTheDocument();
+  });
+
+  it("shows save error details without discarding edits and clears them after a successful retry", async () => {
+    const fetchMock = mockApi({ title: { tag: "SetScalar", contents: "Saved" } });
+    render(ContextPanel, { ...props, essayPath: null });
+    await screen.findByDisplayValue("Saved");
+    await fireEvent.input(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved" } });
+    fetchMock.mockImplementation(async () => json({ error: { message: "Invalid title.", details: { field: "title.contents" } } }, 422));
+    await fireEvent.click(screen.getByRole("button", { name: "Save context" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("title.contents")).toBeInTheDocument();
+    expect(within(alert).queryByText("File")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsaved");
+    mockApi();
+    await fireEvent.click(screen.getByRole("button", { name: "Save context" }));
+    await screen.findByText("Context saved.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("identifies a broken parent when inherited lists fail to load", async () => {
+    const fetchMock = mockApi({ instructions: { tag: "AppendList", contents: ["Local instruction."] } });
+    const implementation = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => new URL(String(input), "http://localhost").searchParams.get("path") === "context.json"
+      ? json({ error: { message: "Invalid parent.", details: { path: "context.json", field: "instructions" } } }, 422)
+      : implementation(input, init));
+    render(ContextPanel, { ...props, essayPath: null });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Unable to load inherited items: Invalid parent.");
+    expect(within(alert).getByText("context.json")).toBeInTheDocument();
+    expect(within(alert).getByText("instructions")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue("Local instruction.");
+  });
 
   it("refreshes saved effective context without discarding unsaved layer edits", async () => {
     const fetchMock = mockApi({ title: { tag: "SetScalar", contents: "Saved title" } });
@@ -135,6 +207,9 @@ describe("Writing context", () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: { message: "Unable to access context." } }, 500)));
     render(ContextPanel, { ...props, essayPath: null });
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to access context.");
+    expect(within(screen.getByRole("alert")).queryByText("File")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("alert")).queryByText("Field")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("alert")).queryByText("Details")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create context" })).toBeDisabled();
     mockApi();
     await fireEvent.click(screen.getByRole("button", { name: "Reload" }));
