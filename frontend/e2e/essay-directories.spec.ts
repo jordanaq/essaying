@@ -182,7 +182,7 @@ for (const width of [320, 390, 768, 1280]) {
   });
 }
 
-test("explorer menus and model popups follow dark and light themes", async ({ page }) => {
+test("explorer menus follow dark and light themes", async ({ page }) => {
   await setup(page);
   for (const palette of [
     { background: "rgb(30, 32, 48)", text: "rgb(202, 211, 245)" },
@@ -196,14 +196,6 @@ test("explorer menus and model popups follow dark and light themes", async ({ pa
     await page.keyboard.press("Escape");
     await expect(menu).not.toBeVisible();
 
-    await page.getByRole("combobox", { name: "Model", exact: true }).click();
-    const listbox = page.getByRole("listbox");
-    await expect(listbox).toBeVisible();
-    await expect(listbox).toHaveCSS("background-color", palette.background);
-    const option = page.getByRole("option", { name: "gpt-5.6-luna", exact: true });
-    await expect.poll(() => option.evaluate((element) => getComputedStyle(element.shadowRoot!.querySelector('[part="base"]')!).color)).toBe(palette.text);
-    await page.keyboard.press("Escape");
-    await expect(listbox).not.toBeVisible();
     if (palette.background === "rgb(30, 32, 48)") {
       await page.getByRole("button", { name: "Switch to Light", exact: true }).click();
     }

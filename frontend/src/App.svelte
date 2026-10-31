@@ -118,7 +118,6 @@
       ? "Select a model in Context or your account preferences."
     : "";
   $: canGrade = !gradeUnavailable && !grading;
-  let model = defaultModel;
   let accounts: AccountProfile[] = [];
   let loadingAccounts = false;
   let creatingAccount = false;
@@ -663,7 +662,6 @@
       backendContextTitle = data.sampleContext.title ?? "(none)";
       backendContextModel = data.sampleContext.model ?? "(none)";
       backendInstructionCount = data.sampleContext.instructions.length;
-      model = data.sampleContext.model ?? model;
       status = "Backend ready";
       uiLog("info", "Backend ready", {
         message: data.message,
@@ -761,10 +759,6 @@
     status = "Generated prompt applied. Save Prompt to keep it.";
     if (assignmentSection) assignmentSection.open = true;
     assignmentEditor?.focus();
-  }
-
-  function handleModelChange(e: Event) {
-    model = (e.target as { value?: string }).value ?? model;
   }
 
   function togglePanel(panel: keyof typeof panelState) {
@@ -1170,12 +1164,6 @@
 
       {#if panelState.editor}
         <div class="meta">
-          <sl-select label="Model" value={model} on:sl-change={handleModelChange}>
-            {#each providerModels as modelId}
-              <sl-option value={modelId}>{modelId}</sl-option>
-            {/each}
-          </sl-select>
-
           <details class="writing-section assignment-editor" open bind:this={assignmentSection}>
             <summary aria-label="Assignment prompt section">
               <span class="writing-section-title">Assignment prompt</span>
