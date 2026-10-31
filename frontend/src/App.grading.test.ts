@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
+import { rawEditor } from "./test/editors";
 import type { EffectiveContext } from "./context-api";
 
 const context: EffectiveContext = {
@@ -39,11 +40,11 @@ async function setup(options: { effective?: EffectiveContext; draft?: string; mo
   const rendered = render(App);
   await screen.findByText("Currently editing Religion/First Essay.");
   const gradeButton = () => screen.getByText("Grade essay", { selector: "sl-button" });
-  const editor = (label: string) => Array.from(rendered.container.querySelectorAll<HTMLElement & { label: string; value: string }>("sl-textarea")).find((element) => element.label === label)!;
+  await rawEditor("Assignment prompt");
+  await rawEditor("Essay Markdown");
+  const editor = (label: string) => screen.getByRole("textbox", { name: label }) as HTMLTextAreaElement;
   const input = async (label: string, value: string) => {
-    const element = editor(label);
-    element.value = value;
-    await fireEvent(element, new CustomEvent("sl-input"));
+    await fireEvent.input(editor(label), { target: { value } });
   };
   return { ...rendered, state, fetchMock, gradeButton, editor, input };
 }

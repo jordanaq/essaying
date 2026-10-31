@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 const result = { overallScore: 80, feedback: "A clear comparative argument.", criteria: {
   interpretation: { score: 90, feedback: "Distinguishes authorial voices.", normalizedWeight: 0.5 },
@@ -31,6 +32,7 @@ async function setup(page: Page) {
     return route.fulfill({ status: 404 });
   });
   await page.goto("/");
+  await useRawEditors(page);
   await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("Saved draft.");
   return state;
 }

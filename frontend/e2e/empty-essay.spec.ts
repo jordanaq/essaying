@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 test("switching to an empty essay clears the editor and saves empty markdown", async ({ page }) => {
   const populated = { path: ["meow", "meoww"], title: "meoww", prompt: "", markdown: "mrroww" };
@@ -28,6 +29,7 @@ test("switching to an empty essay clears the editor and saves empty markdown", a
   });
 
   await page.goto("/");
+  await useRawEditors(page);
   const editor = page.getByRole("textbox", { name: "Essay Markdown", exact: true });
   await expect(editor).toHaveValue("mrroww");
   await page.locator('.tree-item-name[title="meow in"]').click();

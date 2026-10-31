@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 type Essay = { path: string[]; title: string; prompt: string; markdown: string };
 
@@ -68,6 +69,7 @@ async function setup(page: Page, firstTitle = "First Essay") {
     }
   });
   await page.goto("/");
+  await useRawEditors(page);
   await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("First draft");
   return { state, essays, finishSave };
 }
@@ -159,10 +161,12 @@ for (const width of [320, 390, 768, 1280]) {
     const text = "# A heading\n\nA paragraph with **emphasis** and a long link:\nhttps://example.com/" + "long-path".repeat(100);
     await draft.fill(text);
     await expect(draft).toHaveValue(text);
+    await page.getByRole("button", { name: "Raw Markdown for Essay Markdown", exact: true }).click();
+    await expect(draft.getByRole("heading", { name: "A heading" })).toBeVisible();
     expect(await draft.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     const typography = await draft.evaluate((element) => {
       const style = getComputedStyle(element);
-      return { font: style.fontFamily, size: parseFloat(style.fontSize), line: parseFloat(style.lineHeight), resize: style.resize };
+      return { font: style.fontFamily, size: parseFloat(style.fontSize), line: parseFloat(style.lineHeight), resize: getComputedStyle(element.parentElement!).resize };
     });
     expect(typography.font).not.toContain("monospace");
     expect(typography.size).toBeGreaterThanOrEqual(16);
@@ -304,6 +308,7 @@ test("failed saves keep edits, retry works, and empty prompt and draft persist",
   await expect(page.getByText("Draft saved.", { exact: true })).toBeVisible();
   expect(state.writes.slice(-2)).toEqual([{ prompt: "" }, { markdown: "" }]);
   await page.reload();
+  await useRawEditors(page);
   await expect(prompt).toHaveValue("");
   await expect(draft).toHaveValue("");
 });
@@ -366,6 +371,7 @@ test("late essay loads cannot replace another account's view", async ({ page }) 
   await page.getByText("Log Out", { exact: true }).click();
   await page.getByText("bob", { exact: true }).click();
   await expect(page.getByText("Logged in as bob (bob)", { exact: true })).toBeVisible();
+  await useRawEditors(page);
   await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("First draft");
   await pending!.fulfill({ json: { path: ["Second Essay"], title: "Stale", prompt: "Stale prompt", markdown: "Stale draft" } });
   await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("First draft");
@@ -449,6 +455,7 @@ for (const field of ["prompt", "draft", "context"] as const) {
     const discardWarning = await confirmedDialog;
     expect(discardWarning.type()).toBe("beforeunload");
     await Promise.all([page.waitForEvent("load"), discardWarning.accept(), confirmedReload]);
+    await useRawEditors(page);
     await expect(page.getByRole("textbox", { name: "Essay Markdown", exact: true })).toHaveValue("First draft");
     await expect(page.getByRole("textbox", { name: "Assignment prompt", exact: true })).toHaveValue("First assignment");
     await expect(page.getByRole("region", { name: "Writing context" }).getByLabel("Title behavior")).toHaveValue("inherit");

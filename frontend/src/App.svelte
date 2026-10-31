@@ -3,6 +3,7 @@
   import ContextPanel from "./ContextPanel.svelte";
   import PromptGenerator from "./PromptGenerator.svelte";
   import GradeFeedback from "./GradeFeedback.svelte";
+  import MarkdownEditor from "./MarkdownEditor.svelte";
   import { gradeEssay, type GradeResult } from "./grading-api";
   import { defaultModel, providerModels } from "./provider-models";
   import { createContextPreview, contextSelection } from "./context-preview";
@@ -16,7 +17,6 @@
   import "@shoelace-style/shoelace/dist/components/option/option.js";
   import "@shoelace-style/shoelace/dist/components/select/select.js";
   import "@shoelace-style/shoelace/dist/components/spinner/spinner.js";
-  import "@shoelace-style/shoelace/dist/components/textarea/textarea.js";
 
   type ReadyResponse = {
     message: string;
@@ -765,11 +765,6 @@
     model = (e.target as { value?: string }).value ?? model;
   }
 
-  function handleMarkdownInput(e: Event) {
-    markdown = (e.target as { value?: string }).value ?? markdown;
-    draftNotice = "";
-  }
-
   function togglePanel(panel: keyof typeof panelState) {
     panelState = {
       ...panelState,
@@ -1179,11 +1174,12 @@
             {/each}
           </sl-select>
 
-          <section class="assignment-editor" aria-label="Assignment prompt editor">
-            <sl-textarea class="writing-editor" bind:this={assignmentEditor} label="Assignment prompt" rows="5" resize="vertical" value={prompt}
+          <section class="assignment-editor">
+            <MarkdownEditor bind:this={assignmentEditor} label="Assignment prompt" rows={5} bind:value={prompt}
+              documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
               disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
-              on:sl-input={(event: Event) => { prompt = (event.target as { value?: string }).value ?? prompt; promptNotice = ""; }}
-              placeholder="Describe the assignment, question, or requirements."></sl-textarea>
+              onChange={() => { promptNotice = ""; }}
+              placeholder="Describe the assignment, question, or requirements." />
             <div class="editor-actions">
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
               <sl-button variant="default" on:click={() => saveEssayField("prompt")}
@@ -1206,15 +1202,14 @@
               {/key}
             {/if}
           </section>
-          <sl-textarea
-            class="writing-editor draft-editor"
+          <MarkdownEditor
             label="Essay Markdown"
-            rows="18"
-            resize="vertical"
-            value={markdown}
+            rows={18}
+            bind:value={markdown}
+            documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
             disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
-            on:sl-input={handleMarkdownInput}
-          ></sl-textarea>
+            onChange={() => { draftNotice = ""; }}
+          />
         </div>
 
         <div class="editor-actions">

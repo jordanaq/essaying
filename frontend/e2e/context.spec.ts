@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 test("edit folder context and preview inheritance through the live API", async ({ page, request }) => {
   const accountId = `e2e-context-${Date.now()}`;
@@ -12,6 +13,7 @@ test("edit folder context and preview inheritance through the live API", async (
     } } })).ok()).toBeTruthy();
     await page.addInitScript((id) => localStorage.setItem("essay-account-id", id), accountId);
     await page.goto("/");
+    await useRawEditors(page);
     const panel = page.getByRole("region", { name: "Writing context" });
     await expect(panel.getByLabel("Edit settings for")).toHaveValue("History/draft");
     await expect(panel.getByLabel("Edit settings for").locator("option")).toHaveText([
@@ -48,6 +50,7 @@ test("edit folder context and preview inheritance through the live API", async (
     savedEssay = await request.get(`${base}/essays/History/draft`);
     expect(await savedEssay.json()).toMatchObject({ prompt: "Compare short-term and long-term causes.", markdown: "# Unsaved response" });
     await page.reload();
+    await useRawEditors(page);
     await expect(prompt).toHaveValue("Compare short-term and long-term causes.");
     await expect(draft).toHaveValue("# Unsaved response");
     await expect(panel.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Causes of change");

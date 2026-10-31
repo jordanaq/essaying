@@ -423,26 +423,7 @@ sl-badge::part(base) {
   text-align: left;
 }
 
-.writing-editor {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.writing-editor::part(textarea) {
-  font-family: inherit;
-  font-size: 1rem;
-  line-height: 1.65;
-  padding: 12px 14px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.draft-editor::part(textarea) {
-  min-height: 16rem;
-}
-
 sl-input::part(base),
-sl-textarea::part(base),
 sl-select::part(combobox) {
   background: color-mix(in oklab, var(--ctp-surface0) 88%, black 12%);
   border-color: color-mix(in oklab, var(--ctp-surface2) 65%, black 35%);
@@ -450,7 +431,6 @@ sl-select::part(combobox) {
 }
 
 sl-input::part(input),
-sl-textarea::part(textarea),
 sl-select::part(display-input) {
   color: var(--ctp-text);
 }

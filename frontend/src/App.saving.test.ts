@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
+import { rawEditor } from "./test/editors";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 
@@ -30,14 +31,13 @@ async function setup() {
     return new Response("", { status: 200 });
   }));
   localStorage.setItem("essay-account-id", "alice");
-  const { container } = render(App);
+  render(App);
   await screen.findByText("Currently editing Notes.");
-  const editor = (label: string) => Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string }>("sl-textarea"))
-    .find((element) => element.label === label)!;
+  await rawEditor("Assignment prompt");
+  await rawEditor("Essay Markdown");
+  const editor = (label: string) => screen.getByRole("textbox", { name: label }) as HTMLTextAreaElement;
   const input = async (label: string, value: string) => {
-    const element = editor(label);
-    element.value = value;
-    await fireEvent(element, new CustomEvent("sl-input"));
+    await fireEvent.input(editor(label), { target: { value } });
   };
   return { state, essay, editor, input };
 }

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
+import { rawEditor } from "./test/editors";
 
 type ApiResponse = {
   status: number;
@@ -101,14 +102,11 @@ describe("App account login flow", () => {
       return new Response("", { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { container } = render(App);
+    render(App);
     await screen.findByText("Currently editing Religion.");
-    const editor = (label: string) => Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string }>("sl-textarea"))
-      .find((element) => element.label === label)!;
-    const promptEditor = editor("Assignment prompt");
-    const draftEditor = editor("Essay Markdown");
-    draftEditor.value = "Unsaved draft";
-    await fireEvent(draftEditor, new CustomEvent("sl-input"));
+    const promptEditor = await rawEditor("Assignment prompt");
+    const draftEditor = await rawEditor("Essay Markdown");
+    await fireEvent.input(draftEditor, { target: { value: "Unsaved draft" } });
     await fireEvent.click(screen.getByText("Generate prompts", { selector: "summary" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled());
     await fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -238,12 +236,9 @@ describe("App account login flow", () => {
       container.querySelector('sl-tree-item[data-path="[\\"History\\",\\"French Revolution\\"]"]')
     );
 
-    const editor = Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string; updateComplete: Promise<boolean> }>("sl-textarea")).find((element) => element.label === "Essay Markdown") as (HTMLElement & { value: string }) | null;
-    if (!editor) {
-      throw new Error("Essay editor not found");
-    }
-    editor.value = "# Updated notes";
-    await fireEvent(editor, new CustomEvent("sl-input", { bubbles: true, composed: true }));
+    await screen.findByText("Currently editing History/French Revolution/Notes.");
+    const editor = await rawEditor("Essay Markdown");
+    await fireEvent.input(editor, { target: { value: "# Updated notes" } });
     await fireEvent.click(screen.getByText("Save Draft"));
 
     await waitFor(() => {
@@ -283,12 +278,9 @@ describe("App account login flow", () => {
     ]);
     vi.stubGlobal("fetch", fetchMock);
     const { container } = render(App);
-    const editor = await waitFor(() => {
-      const element = Array.from(container.querySelectorAll<HTMLElement & { label: string; value: string; updateComplete: Promise<boolean> }>("sl-textarea")).find((element) => element.label === "Essay Markdown") as
-        (HTMLElement & { value: string; updateComplete: Promise<boolean> }) | null;
-      expect(element?.value).toBe(initialMarkdown);
-      return element!;
-    });
+    await screen.findByText("Currently editing meow/meoww.");
+    const editor = await rawEditor("Essay Markdown");
+    expect(editor).toHaveValue(initialMarkdown);
 
     const emptyItem = await waitFor(() => {
       const item = Array.from(container.querySelectorAll("sl-tree-item"))
@@ -296,16 +288,14 @@ describe("App account login flow", () => {
       expect(item).toBeDefined();
       return item!;
     });
-    editor.value = "mrroww";
-    await fireEvent(editor, new CustomEvent("sl-input", { bubbles: true, composed: true }));
+    await fireEvent.input(editor, { target: { value: "mrroww" } });
     await fireEvent(container.querySelector("sl-tree")!, new CustomEvent("sl-selection-change", {
       detail: { selection: [emptyItem] }, bubbles: true
     }));
 
     await screen.findByText("Currently editing meow/meow in/Empty Essay.");
     await waitFor(() => expect(editor.value).toBe(""));
-    await editor.updateComplete;
-    expect(editor.shadowRoot?.querySelector("textarea")).toHaveValue("");
+    expect(editor).toHaveValue("");
 
     await fireEvent.click(screen.getByText("Save Draft"));
     await waitFor(() => {

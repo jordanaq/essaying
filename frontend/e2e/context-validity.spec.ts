@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 test("context validity gates grading while editing, saving, and collapsed-panel recovery remain usable", async ({ page }) => {
   const context = { title: "Saved settings", audience: null, model: "gpt-6.1-sol", tags: [], instructions: [], grading_directions: [], rubric: { clarity: { weight: 1, description: null } } };
@@ -39,6 +40,7 @@ test("context validity gates grading while editing, saving, and collapsed-panel 
   });
 
   await page.goto("/");
+  await useRawEditors(page);
   const grade = page.locator("sl-button").filter({ hasText: "Grade essay" });
   await expect.poll(() => !!releaseInitial).toBe(true);
   await expect(grade).toHaveJSProperty("disabled", true);

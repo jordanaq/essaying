@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { useRawEditors } from "./support/editors";
 
 for (const operation of ["save", "delete"] as const) {
   for (const succeeds of [true, false]) {
@@ -30,6 +31,7 @@ for (const operation of ["save", "delete"] as const) {
       });
 
       await page.goto("/");
+      await useRawEditors(page);
       const panel = page.getByRole("region", { name: "Writing context" });
       const grade = page.locator("sl-button").filter({ hasText: "Grade essay" });
       await expect(grade).toHaveJSProperty("disabled", false);
