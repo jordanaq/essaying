@@ -527,12 +527,20 @@ sl-button[variant="primary"]::part(base) {
 }
 
 .assignment-editor {
-  display: grid;
-  gap: 8px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--sl-color-neutral-200);
   min-width: 0;
 }
 .assignment-editor .editor-actions { margin-top: 0; }
+
+.writing-section { min-width: 0; }
+.writing-section > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; cursor: pointer; padding: 10px 0; list-style: none; }
+.writing-section > summary::-webkit-details-marker { display: none; }
+.writing-section > summary::before { content: "▸"; }
+.writing-section[open] > summary::before { content: "▾"; }
+.writing-section > summary:focus-visible { outline: 2px solid var(--ctp-rosewater); outline-offset: 2px; border-radius: 4px; }
+.writing-section-title { font-size: .9rem; font-weight: 600; }
+.writing-section-status { margin-left: auto; color: var(--ctp-subtext0); font-size: .78rem; overflow-wrap: anywhere; }
+.writing-section-body { display: grid; gap: 8px; min-width: 0; }
 
 .context-navigation-guard { border: 0; padding: 0; margin: 0; min-width: 0; }

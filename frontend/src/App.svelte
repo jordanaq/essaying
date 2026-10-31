@@ -79,6 +79,7 @@
   let markdown = "";
   let prompt = "";
   let assignmentEditor: { focus: () => void } | undefined;
+  let assignmentSection: HTMLDetailsElement | undefined;
   let savingPrompt = false;
   let essayLoading = false;
   let loadingEssayPath: string[] | null = null;
@@ -758,6 +759,7 @@
     promptError = "";
     promptNotice = "Generated prompt applied. Save Prompt to keep it.";
     status = "Generated prompt applied. Save Prompt to keep it.";
+    if (assignmentSection) assignmentSection.open = true;
     assignmentEditor?.focus();
   }
 
@@ -1174,57 +1176,71 @@
             {/each}
           </sl-select>
 
-          <section class="assignment-editor">
-            <MarkdownEditor bind:this={assignmentEditor} label="Assignment prompt" rows={5} bind:value={prompt}
-              documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
-              disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
-              onChange={() => { promptNotice = ""; }}
-              placeholder="Describe the assignment, question, or requirements." />
-            <div class="editor-actions">
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-button variant="default" on:click={() => saveEssayField("prompt")}
-                disabled={savingPrompt || essayLoading || !selectedWorkspaceEssay}>
-                {savingPrompt ? "Saving prompt…" : "Save Prompt"}
-              </sl-button>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <sl-button variant="text" disabled={!promptDirty || savingPrompt}
-                on:click={() => { prompt = selectedWorkspaceEssay?.prompt ?? ""; promptError = promptNotice = ""; }}>Discard prompt changes</sl-button>
-              <span class="footer-note" role="status" aria-label="Prompt save status" aria-atomic="true">{promptSaveStatus}</span>
+          <details class="writing-section assignment-editor" open bind:this={assignmentSection}>
+            <summary aria-label="Assignment prompt section">
+              <span class="writing-section-title">Assignment prompt</span>
+              <span class="writing-section-status" role="status" aria-label="Prompt save status" aria-atomic="true">{promptSaveStatus}</span>
+            </summary>
+            <div class="writing-section-body">
+              <MarkdownEditor bind:this={assignmentEditor} label="Assignment prompt" rows={5} bind:value={prompt}
+                documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
+                disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
+                onChange={() => { promptNotice = ""; }}
+                placeholder="Describe the assignment, question, or requirements." />
+              <div class="editor-actions">
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <sl-button variant="default" on:click={() => saveEssayField("prompt")}
+                  disabled={savingPrompt || essayLoading || !selectedWorkspaceEssay}>
+                  {savingPrompt ? "Saving prompt…" : "Save Prompt"}
+                </sl-button>
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <sl-button variant="text" disabled={!promptDirty || savingPrompt}
+                  on:click={() => { prompt = selectedWorkspaceEssay?.prompt ?? ""; promptError = promptNotice = ""; }}>Discard prompt changes</sl-button>
+              </div>
+              {#if promptError}<p class="login-error" role="alert">{promptError}</p>{/if}
+              {#if activeAccountId && selectedWorkspaceEssay}
+                {#key JSON.stringify([activeAccountId, selectedWorkspaceEssay.path, essayRevision])}
+                  <PromptGenerator accountId={activeAccountId} essayPath={selectedWorkspaceEssay.path}
+                    {contextReady} {contextDirty}
+                    onAdopt={adoptPrompt}
+                    unavailableReason={essayLoading || workspaceLoading ? "Wait for the essay to finish loading."
+                      : operationPending ? "Wait for the current save or workspace change to finish." : ""} />
+                {/key}
+              {/if}
             </div>
-            {#if promptError}<p class="login-error" role="alert">{promptError}</p>{/if}
-            {#if activeAccountId && selectedWorkspaceEssay}
-              {#key JSON.stringify([activeAccountId, selectedWorkspaceEssay.path, essayRevision])}
-                <PromptGenerator accountId={activeAccountId} essayPath={selectedWorkspaceEssay.path}
-                  {contextReady} {contextDirty}
-                  onAdopt={adoptPrompt}
-                  unavailableReason={essayLoading || workspaceLoading ? "Wait for the essay to finish loading."
-                    : operationPending ? "Wait for the current save or workspace change to finish." : ""} />
-              {/key}
-            {/if}
-          </section>
-          <MarkdownEditor
-            label="Essay Markdown"
-            rows={18}
-            bind:value={markdown}
-            documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
-            disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
-            onChange={() => { draftNotice = ""; }}
-          />
+          </details>
+          <details class="writing-section" open>
+            <summary aria-label="Essay draft section">
+              <span class="writing-section-title">Essay draft</span>
+              <span class="writing-section-status" role="status" aria-label="Draft save status" aria-atomic="true">{draftSaveStatus}</span>
+            </summary>
+            <div class="writing-section-body">
+              <MarkdownEditor
+                label="Essay Markdown"
+                rows={18}
+                bind:value={markdown}
+                documentKey={JSON.stringify([activeAccountId, selectedWorkspaceEssay?.path])}
+                disabled={!selectedWorkspaceEssay || essayLoading || workspaceLoading || workspaceCreateBusy || workspaceDeleteBusy}
+                onChange={() => { draftNotice = ""; }}
+              />
+              <div class="editor-actions">
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <sl-button variant="primary" on:click={() => saveEssayField("markdown")} disabled={savingDraft || essayLoading || selectedWorkspaceEssay === null}>
+                  {savingDraft ? "Saving draft…" : "Save Draft"}
+                </sl-button>
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <sl-button variant="text" disabled={!draftDirty || savingDraft}
+                  on:click={() => { markdown = selectedWorkspaceEssay?.markdown ?? ""; draftError = draftNotice = ""; }}>Discard draft changes</sl-button>
+              </div>
+              {#if draftError}<p class="login-error" role="alert">{draftError}</p>{/if}
+            </div>
+          </details>
         </div>
 
         <div class="editor-actions">
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="primary" on:click={() => saveEssayField("markdown")} disabled={savingDraft || essayLoading || selectedWorkspaceEssay === null}>
-            {savingDraft ? "Saving draft…" : "Save Draft"}
-          </sl-button>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <sl-button variant="text" disabled={!draftDirty || savingDraft}
-            on:click={() => { markdown = selectedWorkspaceEssay?.markdown ?? ""; draftError = draftNotice = ""; }}>Discard draft changes</sl-button>
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
           <sl-button variant="default" on:click={requestGrade} disabled={!canGrade} aria-describedby={canGrade ? undefined : "grade-context-status"}>{grading ? "Grading…" : "Grade essay"}</sl-button>
         </div>
-        {#if draftError}<p class="login-error" role="alert">{draftError}</p>{/if}
-        <p class="footer-note" role="status" aria-label="Draft save status" aria-atomic="true">{draftSaveStatus}</p>
         {#if essayLoading}<p class="footer-note" role="status">Loading essay…</p>{/if}
         {#if !canGrade}<p id="grade-context-status" class="footer-note" role="status">{grading ? "Grading your saved essay…" : gradeUnavailable}</p>{/if}
         {#if selectedWorkspaceEssay}

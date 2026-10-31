@@ -349,6 +349,46 @@ test("same-content document switches clear formatting history and folders disabl
 });
 
 for (const width of [320, 390, 1280]) {
+  test(`editors collapse independently and preserve rendered/raw edits at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { state } = await setup(page);
+    const prompt = editorFor(page, "Assignment prompt");
+    const draft = editorFor(page, "Essay Markdown");
+    const promptHeader = page.locator('summary[aria-label="Assignment prompt section"]');
+    const draftHeader = page.locator('summary[aria-label="Essay draft section"]');
+    await expect(prompt).toBeVisible();
+    await expect(draft).toBeVisible();
+    await draft.fill("Focus on this draft");
+    await draft.press("ControlOrMeta+a");
+    await draft.press("ControlOrMeta+b");
+    await toggleFor(page, "Assignment prompt").click();
+    await prompt.fill("**Unsaved assignment**");
+
+    const expandedHeight = (await promptHeader.locator("..").boundingBox())!.height;
+    await promptHeader.click();
+    await expect(prompt).not.toBeVisible();
+    await expect(draft).toBeVisible();
+    await expect(promptHeader.getByRole("status", { name: "Prompt save status" })).toHaveText("Unsaved prompt changes");
+    expect((await promptHeader.locator("..").boundingBox())!.height).toBeLessThan(expandedHeight - 100);
+    await promptHeader.press("Tab");
+    await expect(draftHeader).toBeFocused();
+    await draftHeader.press("Enter");
+    await expect(draft).not.toBeVisible();
+    await expect(draftHeader.getByRole("status", { name: "Draft save status" })).toHaveText("Unsaved draft changes");
+    await expect(page.getByRole("button", { name: "Grade essay", exact: true })).toBeVisible();
+
+    await draftHeader.press("Space");
+    await expect(draft.locator("strong")).toHaveText("Focus on this draft");
+    await toolbarFor(page, "Essay Markdown").getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(draft.locator("strong")).toHaveCount(0);
+    await expect(draft).toHaveText("Focus on this draft");
+    await promptHeader.click();
+    await expect(prompt).toHaveValue("**Unsaved assignment**");
+    await expect(toggleFor(page, "Assignment prompt")).toHaveAttribute("aria-pressed", "true");
+    expect(state.writes).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+
   test(`both rendered editors wrap and their toolbars stay usable at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await setup(page);
@@ -364,3 +404,32 @@ for (const width of [320, 390, 1280]) {
     await page.screenshot({ path: testInfo.outputPath("integrated-editors.png"), fullPage: true });
   });
 }
+
+test("collapsed editors still show pending/success/failure save status and navigation guards", async ({ page }) => {
+  const { state, finishSave } = await setup(page);
+  const draft = editorFor(page, "Essay Markdown");
+  const header = page.locator('summary[aria-label="Essay draft section"]');
+  await draft.fill("A pending draft");
+  state.holdSave = true;
+  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+  await expect.poll(() => !!state.pending).toBe(true);
+  await header.click();
+  await expect(header.getByRole("status")).toHaveText("Saving draft…");
+  await finishSave();
+  await expect(header.getByRole("status")).toHaveText("Draft saved.");
+  await expect(draft).not.toBeVisible();
+  await header.click();
+  await draft.fill("Keep this draft");
+  state.holdSave = false;
+  state.failSave = true;
+  await page.getByRole("button", { name: "Save Draft", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Disk is full.");
+  await header.click();
+  await expect(header.getByRole("status")).toContainText("Draft not saved");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.locator('.tree-item-name[title="Second Essay"]').click();
+  await expect(page.getByText("Currently editing First Essay.", { exact: true })).toBeVisible();
+  await header.click();
+  await expect(draft).toHaveText("Keep this draft");
+  await expect(page.getByRole("alert")).toContainText("Disk is full.");
+});
