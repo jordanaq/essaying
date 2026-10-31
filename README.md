@@ -48,6 +48,11 @@ The explorer shows essays as leaves. Draft and assignment save independently;
 empty text clears a field, and deleting an essay removes its whole directory.
 Context errors leave local editing and saving available.
 
+Draft and assignment editors render Markdown by default and include formatting
+controls, keyboard shortcuts, and a raw Markdown toggle. Both save Markdown
+through the existing independent save flows. See the [frontend guide](frontend/README.md)
+for supported formatting, shortcuts, and source-mode limitations.
+
 The existing cache has been converted to this format. Migration is complete;
 there is no startup conversion or legacy-layout verification step.
 See [the storage contract](docs/ESSAY_DIRECTORY_PLAN.md),

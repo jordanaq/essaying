@@ -104,9 +104,23 @@ update. Existing provider samples and recorded-response fixtures already use
 ## Remaining feature work
 
 E07 prompt generation/adoption, E08/E09 grading/results, and E10 editor
-reliability/polish are complete with user acceptance on 2026-10-30. Latest recorded
-frontend verification passed 47 component cases, 39 affected mocked-API browser
+reliability/polish are complete with user acceptance on 2026-10-30. Recorded E10
+verification passed 47 component cases, 39 affected mocked-API browser
 scenarios, and a production build with zero Svelte diagnostics.
+
+L21 rendered Markdown editing is complete with user acceptance on 2026-10-30.
+Both draft and assignment use the shared Svelte/Tiptap component, which
+provides a raw-source toggle, formatting controls, headings, both list types,
+and keyboard shortcuts while retaining independent save/discard behavior.
+Both editors collapse independently while preserving edits and undo history;
+their headers retain save status. The unused editor Model selector is removed;
+AI requests use the saved context model or account preference.
+Verification passed 76 frontend cases and 81 component/app Chromium scenarios
+with mocked APIs (one interrupted by a development reload passed on rerun).
+After removing the unused selector, three affected browser cases and the
+typechecked production build passed with zero Svelte diagnostics.
+Vite reports a bundle-size warning for the added editor dependency. See the
+[frontend guide](../frontend/README.md) for supported Markdown and test commands.
 
 E11 filesystem/API hardening is next. E12 retains complete isolated-cache,
 restart, account-isolation, and provider workflow checks; E13 retains fresh-setup
