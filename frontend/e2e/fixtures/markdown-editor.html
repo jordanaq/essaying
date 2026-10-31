@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Markdown editor review</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mount } from "svelte";
+      import Harness from "./MarkdownEditorHarness.svelte";
+      import "../../src/app.css";
+      mount(Harness, { target: document.getElementById("app") });
+    </script>
+  </body>
+</html>
